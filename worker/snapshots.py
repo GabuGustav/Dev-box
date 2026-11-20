@@ -418,8 +418,10 @@ class SnapshotStore:
         _, workspace_directory = self.workspace_storage._workspace_path(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
         backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
-        if workspace_directory.is_symlink():
-            raise SnapshotError("Workspace restore target is an unexpected symbolic link.")
+        if workspace_directory.is_symlink() or (
+            workspace_directory.exists() and not workspace_directory.is_dir()
+        ):
+            raise SnapshotError("Workspace restore target is not a safe directory.")
         for path in (stage, backup):
             if path.is_symlink() or (path.exists() and not path.is_dir()):
                 raise SnapshotError("Restore recovery path is not a safe directory.")
