@@ -63,7 +63,7 @@ For each workspace:
 5. Reapply bhard and ihard limits before each start/resume, without recursively walking an already initialized tree.
 6. Set the directory owner to UID/GID 10001, then bind-mount only that directory at /workspace.
 
-The registry is stored on the dedicated storage filesystem, outside individual workspace directories. It is required state: if it is missing while other storage data exists, provisioning fails closed. Back up the registry together with the workspace filesystem. Do not manually delete or edit it.
+The registry is stored on the dedicated storage filesystem, outside individual workspace directories. It maps workspace IDs to project IDs and paths and records each directory's device/inode identity. Missing or replaced registered directories fail closed instead of being silently recreated; restore them from a snapshot. The registry is required state: if it is missing while other storage data exists, provisioning fails closed. Back it up together with the workspace filesystem. Do not manually delete or edit it.
 
 The API's storage_ref is an opaque backend reference, not a Docker volume name or a credential.
 
@@ -71,6 +71,7 @@ The API's storage_ref is an opaque backend reference, not a Docker volume name o
 
 - **Stop / pause:** keep the directory, project ID, quota, and data.
 - **Start / resume:** reuse the same directory and reapply its quota configuration before attaching it.
+- **Restore:** require a stopped workspace, decrypt and validate into a quota-bound staging tree, swap it into place, and refresh the registered directory identity.
 - **Delete:** remove the workspace container first, clear the XFS project tree and quota, remove the directory, and release its registry entry.
 - **Legacy named-volume workspace:** the worker refuses to start an existing container whose /workspace mount does not match the XFS directory. Its old Docker volume is not automatically deleted or migrated.
 
