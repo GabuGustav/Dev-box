@@ -189,11 +189,22 @@ class SnapshotStore:
                     raise SnapshotError("Registered snapshot path is not a regular file.")
             else:
                 raise SnapshotError("Snapshot directory contains an unexpected entry.")
+        missing_files = []
         for filename in known_files:
             if not re.fullmatch(r"[0-9a-f]{32}\.dbxsnap", filename):
                 raise SnapshotError("Snapshot registry contains an unsafe filename.")
             if not (directory / filename).is_file():
-                raise SnapshotError("Snapshot registry references a missing encrypted file.")
+                missing_files.append(filename)
+        if missing_files:
+            connection = self._connect()
+            try:
+                connection.executemany(
+                    "DELETE FROM snapshots WHERE workspace_id = ? AND filename = ?",
+                    [(workspace_id, filename) for filename in missing_files],
+                )
+                connection.commit()
+            finally:
+                connection.close()
         return directory
 
     def _require_key(self) -> bytes:
