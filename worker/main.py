@@ -393,6 +393,7 @@ def create_snapshot(workspace_id: str) -> dict:
     store = require_snapshot_store()
     container_name, _ = names_for(workspace_id)
     try:
+        store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
         was_running = False
         try:
@@ -511,6 +512,7 @@ def delete_snapshot(workspace_id: str, snapshot_id: str) -> dict:
 def delete_workspace(workspace_id: str) -> dict:
     container_name, volume_name = names_for(workspace_id)
     try:
+        snapshot_store.recover_restore(workspace_id)
         workspace_storage.validate_backend()
     except WorkspaceStorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
