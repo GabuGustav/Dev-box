@@ -41,7 +41,8 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 ## Run locally
 
 1. Install Docker Desktop with Linux containers enabled and Python 3.12+.
-2. Prepare a dedicated Linux XFS filesystem for workspace data. Mount it with project quotas enabled (`prjquota` or `pquota`) at `/srv/devbox/workspaces` (or your chosen `WORKSPACE_STORAGE_ROOT`). The mount must already exist before Compose starts. Do not format a disk that contains data; use a dedicated data volume and follow your host OS's XFS setup procedure.\n3. Copy `.env.example` to `.env`.
+2. Prepare a dedicated Linux XFS filesystem for workspace data. Mount it with project quotas enabled (`prjquota` or `pquota`) at `/srv/devbox/workspaces` (or your chosen `WORKSPACE_STORAGE_ROOT`). The mount must already exist before Compose starts. Do not format a disk that contains data; use a dedicated data volume and follow your host OS's XFS setup procedure.
+3. Copy `.env.example` to `.env`.
 4. Replace `EXECUTOR_SERVICE_TOKEN` with a fresh random secret. For example:
 
    ```powershell
@@ -103,7 +104,9 @@ Workspace containers currently use:
 
 This is container-level isolation, not a VM boundary. The worker supervisor is highly privileged and must remain a trusted internal service. Never expose its port publicly or mount the Docker socket into workspace containers.
 
-**Storage requirements:** the worker refuses to provision a workspace unless the configured storage root is on XFS with project quota accounting and enforcement enabled. The worker uses `xfs_quota` to assign a unique project ID, a hard block limit, and a hard inode limit before mounting the directory into a workspace container. A SQLite registry prevents two workspaces from accidentally sharing a project ID. The workspace storage root must be mounted into the worker at the same absolute path used by the Docker daemon. Docker Desktop and non-XFS local filesystems are not supported for actual workspace provisioning; use them for API/unit-test development only.\n\n**Known Phase 2 gaps:** snapshot/restore, worker crash recovery, Docker-backed persistence tests, and adversarial cross-container filesystem tests are not complete. The current network isolation prevents repository cloning and dependency downloads; controlled egress will be designed with the Git integration phase. Do not treat this branch as production-hardened multi-tenant infrastructure.
+**Storage requirements:** the worker refuses to provision a workspace unless the configured storage root is on XFS with project quota accounting and enforcement enabled. The worker uses `xfs_quota` to assign a unique project ID, a hard block limit, and a hard inode limit before mounting the directory into a workspace container. A SQLite registry prevents two workspaces from accidentally sharing a project ID. The workspace storage root must be mounted into the worker at the same absolute path used by the Docker daemon. Docker Desktop and non-XFS local filesystems are not supported for actual workspace provisioning; use them for API/unit-test development only.
+
+**Known Phase 2 gaps:** snapshot/restore, worker crash recovery, Docker-backed persistence tests, and adversarial cross-container filesystem tests are not complete. The current network isolation prevents repository cloning and dependency downloads; controlled egress will be designed with the Git integration phase. Do not treat this branch as production-hardened multi-tenant infrastructure.
 
 ## Development checks
 
