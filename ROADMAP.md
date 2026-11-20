@@ -32,6 +32,7 @@ This roadmap sequences the project so each phase produces a testable result. Est
 - [x] Apply container CPU, memory, PID, capability, read-only-rootfs, and network-isolation settings.
 - [x] Add database migration for executor and volume references.
 - [x] Add mocked API lifecycle and cross-principal authorization tests.
+- [x] Add executor unit tests for workspace ID scoping, token authentication, and hardened container settings.
 - [ ] Enforce a hard per-workspace disk quota on the selected storage backend.
 - [ ] Implement snapshot and restore.
 - [ ] Verify volume persistence and worker recovery using Docker integration tests.
