@@ -460,8 +460,13 @@ def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
         store.recover_restore(workspace_id)
         workspace_storage.validate_backend()
         _, workspace_path = workspace_storage._workspace_path(workspace_id)
-        if workspace_path.exists() or workspace_path.is_symlink():
-            workspace_storage.ensure_workspace(workspace_id)
+        if workspace_path.is_symlink() or (
+            workspace_path.exists() and not workspace_path.is_dir()
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Workspace storage path is not a safe directory for restore.",
+            )
         try:
             container = docker_client.containers.get(container_name)
             container.reload()
