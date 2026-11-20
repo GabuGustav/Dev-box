@@ -43,7 +43,6 @@ class ExecutorClient:
     def delete(self, workspace_id: str) -> dict:
         return self._request("DELETE", f"/internal/workspaces/{workspace_id}")
 
-
     def create_snapshot(self, workspace_id: str) -> dict:
         return self._request(
             "POST", f"/internal/workspaces/{workspace_id}/snapshots", timeout=900.0
