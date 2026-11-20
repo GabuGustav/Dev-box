@@ -1,5 +1,5 @@
-from fastapi import HTTPException
 import pytest
+from fastapi import HTTPException
 
 from worker import main as executor
 
