@@ -247,3 +247,23 @@ def test_fresh_xfs_lost_found_directory_does_not_block_provisioning(tmp_path):
     directory = storage.ensure_workspace(WORKSPACE_ID)
 
     assert directory.is_dir()
+
+
+
+def test_restore_quota_multiplier_scales_block_and_inode_limits(tmp_path):
+    runner = FakeRunner()
+    storage = make_storage(tmp_path, runner)
+
+    storage.set_project_quota(WORKSPACE_ID, multiplier=3)
+
+    command = [call[0][3] for call in runner.calls if call[0][0] == "xfs_quota"][-1]
+    assert command == (
+        f"limit -p bhard=30g ihard=600000 {storage._project_id(WORKSPACE_ID)}"
+    )
+
+
+def test_restore_quota_multiplier_rejects_unsafe_values(tmp_path):
+    storage = make_storage(tmp_path, FakeRunner())
+
+    with pytest.raises(WorkspaceStorageError, match="multiplier"):
+        storage.set_project_quota(WORKSPACE_ID, multiplier=0)
