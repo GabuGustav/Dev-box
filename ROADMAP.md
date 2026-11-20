@@ -27,19 +27,19 @@ This roadmap sequences the project so each phase produces a testable result. Est
 ## Phase 2 — Isolated persistent workspaces
 
 - [x] Add a separate trusted worker supervisor; keep Docker socket access out of the API and workspace containers.
-- [x] Provision one non-root container and named persistent volume per workspace.
+- [x] Provision one non-root container and persistent XFS-backed directory per workspace.
 - [x] Add owner-scoped start, stop, pause, resume, and delete API operations.
 - [x] Apply container CPU, memory, PID, capability, read-only-rootfs, and network-isolation settings.
 - [x] Add database migration for executor and volume references.
 - [x] Add mocked API lifecycle and cross-principal authorization tests.
 - [x] Add executor unit tests for workspace ID scoping, token authentication, and hardened container settings.
-- [ ] Enforce a hard per-workspace disk quota on the selected storage backend.
+- [x] Enforce per-workspace XFS hard block and inode quotas; fail closed on unsupported storage.
 - [ ] Implement snapshot and restore.
 - [ ] Verify volume persistence and worker recovery using Docker integration tests.
 - [ ] Add adversarial cross-container filesystem/process isolation tests.
 - [ ] Add execution wall-clock limits with the job runner in Phase 4.
 
-**Current Phase 2 boundary:** the executor creates persistent volumes and applies container-level hardening. The default Docker local volume driver does not provide a portable hard disk quota. Workspaces have no network access yet, so repository cloning and dependency installation wait for controlled egress in Phase 3.
+**Current Phase 2 boundary:** the executor creates persistent XFS-backed workspace directories with hard block and inode limits, and applies container-level hardening. The worker requires a dedicated Linux XFS mount with project quota enforcement enabled. Workspaces have no network access yet, so repository cloning and dependency installation wait for controlled egress in Phase 3.
 
 **Exit criteria:** not yet met. Do not mark Phase 2 complete until storage quotas, recovery, and integration isolation tests pass.
 
