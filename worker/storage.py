@@ -29,6 +29,7 @@ class XFSWorkspaceStorage:
         self,
         root: str,
         quota_limit: str,
+        inode_limit: int = 200_000,
         *,
         runner=subprocess.run,
     ) -> None:
@@ -37,7 +38,10 @@ class XFSWorkspaceStorage:
         if not QUOTA_PATTERN.fullmatch(quota_limit):
             raise WorkspaceStorageError("Workspace disk quota must be a positive size such as 10g.")
         self.root = Path(root)
+        if inode_limit < 1:
+            raise WorkspaceStorageError("Workspace inode limit must be a positive integer.")
         self.quota_limit = quota_limit.lower()
+        self.inode_limit = inode_limit
         self.runner = runner
         self.registry = self.root / ".devbox-storage.sqlite3"
 
@@ -152,7 +156,7 @@ class XFSWorkspaceStorage:
             "xfs_quota",
             "-x",
             "-c",
-            f"limit -p bhard={self.quota_limit} {project_id}",
+            f"limit -p bhard={self.quota_limit} ihard={self.inode_limit} {project_id}",
             str(self.root),
         )
         return directory
