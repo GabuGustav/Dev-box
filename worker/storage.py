@@ -38,6 +38,8 @@ class XFSWorkspaceStorage:
         if not QUOTA_PATTERN.fullmatch(quota_limit):
             raise WorkspaceStorageError("Workspace disk quota must be a positive size such as 10g.")
         self.root = Path(root)
+        if not re.fullmatch(r"[A-Za-z0-9_./-]+", str(self.root)):
+            raise WorkspaceStorageError("Workspace storage root contains unsafe command characters.")
         if inode_limit < 1:
             raise WorkspaceStorageError("Workspace inode limit must be a positive integer.")
         self.quota_limit = quota_limit.lower()
@@ -172,6 +174,12 @@ class XFSWorkspaceStorage:
     def delete_workspace(self, workspace_id: str) -> None:
         self.validate_backend()
         _, directory = self._workspace_path(workspace_id)
+        if not self.registry.exists():
+            if directory.exists() or any(self.root.iterdir()):
+                raise WorkspaceStorageError(
+                    "Workspace registry is missing while storage data exists; recover it before deletion."
+                )
+            return
         connection = self._connect()
         try:
             row = connection.execute(
