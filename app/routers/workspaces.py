@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.executor_client import ExecutorClient, ExecutorUnavailable
+from app.executor_client import ExecutorClient, ExecutorRejected, ExecutorUnavailable
 from app.models import AuditEvent, Principal, Workspace
 from app.repositories import get_or_create_repository, normalize_repository_url
 from app.schemas import SnapshotRead, WorkspaceCreate, WorkspaceRead
@@ -55,6 +55,8 @@ def execute_lifecycle(
 ) -> dict:
     try:
         return getattr(executor_client, action)(workspace_id, *args)
+    except ExecutorRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except ExecutorUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
