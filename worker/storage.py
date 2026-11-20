@@ -59,18 +59,21 @@ class XFSWorkspaceStorage:
         return result.stdout
 
     def validate_backend(self) -> None:
-        if not self.root.exists() or not self.root.is_dir():
-            raise WorkspaceStorageError("Workspace storage mount is missing.")
-        try:
-            filesystem = self._run(
-                "findmnt", "-n", "-o", "FSTYPE,OPTIONS", "--target", str(self.root)
-            ).strip()
-        except WorkspaceStorageError:
-            raise
+        if (
+            not self.root.exists()
+            or not self.root.is_dir()
+            or self.root.is_symlink()
+        ):
+            raise WorkspaceStorageError("Workspace storage mount is missing or unsafe.")
+        filesystem = self._run(
+            "findmnt", "-n", "-o", "TARGET,FSTYPE,OPTIONS", "--target", str(self.root)
+        ).strip()
         fields = filesystem.split()
-        if len(fields) < 2 or fields[0] != "xfs":
+        if len(fields) < 3 or fields[1] != "xfs":
             raise WorkspaceStorageError("Workspace storage must reside on an XFS filesystem.")
-        options = set(fields[1].split(","))
+        if Path(fields[0]).resolve() != self.root.resolve():
+            raise WorkspaceStorageError("Workspace storage root must be a dedicated mount point.")
+        options = set(fields[2].split(","))
         if not options.intersection({"prjquota", "pquota", "project"}):
             raise WorkspaceStorageError(
                 "XFS project quotas are not enabled on the workspace storage mount."
@@ -144,6 +147,8 @@ class XFSWorkspaceStorage:
         _, directory = self._workspace_path(workspace_id)
         self.root.mkdir(parents=True, exist_ok=True)
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.is_symlink() or directory.resolve().parent != self.root.resolve():
+            raise WorkspaceStorageError("Workspace storage directory escaped its root.")
         project_id = self._register_project(workspace_id, directory)
         self._run(
             "xfs_quota",
