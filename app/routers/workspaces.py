@@ -9,7 +9,7 @@ from app.database import get_db
 from app.executor_client import ExecutorClient, ExecutorUnavailable
 from app.models import AuditEvent, Principal, Workspace
 from app.repositories import get_or_create_repository, normalize_repository_url
-from app.schemas import WorkspaceCreate, WorkspaceRead
+from app.schemas import SnapshotRead, WorkspaceCreate, WorkspaceRead
 from app.security import get_current_principal
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -210,6 +210,102 @@ def resume_workspace(
         raise HTTPException(status_code=409, detail="Only paused or stopped workspaces can resume.")
     result = execute_lifecycle("resume", workspace.id)
     return record_lifecycle(db, request, principal, workspace, "resumed", result, "running")
+
+
+@router.post(
+    "/{workspace_id}/snapshots",
+    response_model=SnapshotRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_snapshot(
+    workspace_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> SnapshotRead:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Deleted workspaces cannot be snapshotted.")
+    result = execute_lifecycle("create_snapshot", workspace.id)
+    db.add(
+        AuditEvent(
+            actor_id=principal.id,
+            action="workspace.snapshot.created",
+            target_type="snapshot",
+            target_id=result["snapshot_id"],
+            request_id=getattr(request.state, "request_id", None),
+            details={"workspace_id": workspace.id, "size_bytes": result["size_bytes"]},
+        )
+    )
+    db.commit()
+    return SnapshotRead.model_validate(result)
+
+
+@router.get("/{workspace_id}/snapshots", response_model=list[SnapshotRead])
+def list_snapshots(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> list[SnapshotRead]:
+    workspace = owned_workspace(db, principal, workspace_id)
+    result = execute_lifecycle("list_snapshots", workspace.id)
+    return [SnapshotRead.model_validate(item) for item in result["items"]]
+
+
+@router.post("/{workspace_id}/snapshots/{snapshot_id}/restore", response_model=WorkspaceRead)
+def restore_snapshot(
+    workspace_id: str,
+    snapshot_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> WorkspaceRead:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status in {"running", "paused"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Stop the workspace before restoring a snapshot.",
+        )
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Deleted workspaces cannot be restored.")
+    result = execute_lifecycle("restore_snapshot", workspace.id, snapshot_id)
+    result["status"] = "stopped"
+    restored = record_lifecycle(
+        db,
+        request,
+        principal,
+        workspace,
+        "snapshot.restored",
+        result,
+        "stopped",
+    )
+    return restored
+
+
+@router.delete("/{workspace_id}/snapshots/{snapshot_id}")
+def delete_snapshot(
+    workspace_id: str,
+    snapshot_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Workspace is deleted.")
+    result = execute_lifecycle("delete_snapshot", workspace.id, snapshot_id)
+    db.add(
+        AuditEvent(
+            actor_id=principal.id,
+            action="workspace.snapshot.deleted",
+            target_type="snapshot",
+            target_id=snapshot_id,
+            request_id=getattr(request.state, "request_id", None),
+            details={"workspace_id": workspace.id},
+        )
+    )
+    db.commit()
+    return result
 
 
 @router.delete("/{workspace_id}", response_model=WorkspaceRead)
