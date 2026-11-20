@@ -129,6 +129,7 @@ def test_invalid_quota_configuration_is_rejected(tmp_path, quota):
     with pytest.raises(WorkspaceStorageError, match="positive size"):
         XFSWorkspaceStorage(str(tmp_path), quota)
 
+
 def test_missing_registry_with_existing_storage_fails_closed(tmp_path):
     runner = FakeRunner()
     storage = make_storage(tmp_path, runner)
@@ -150,6 +151,7 @@ def test_workspace_storage_root_rejects_unsafe_command_characters(tmp_path):
     with pytest.raises(WorkspaceStorageError, match="unsafe command characters"):
         XFSWorkspaceStorage(str(tmp_path / "unsafe path"), "10g")
 
+
 def test_workspace_directory_is_owned_by_the_unprivileged_runtime_user(tmp_path):
     runner = FakeRunner()
     root = tmp_path / "xfs-workspaces"
@@ -166,3 +168,8 @@ def test_workspace_directory_is_owned_by_the_unprivileged_runtime_user(tmp_path)
 
     assert ownership == [(directory, 10001, 10001)]
     assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_nonpositive_inode_limit_is_rejected(tmp_path):
+    with pytest.raises(WorkspaceStorageError, match="inode limit"):
+        XFSWorkspaceStorage(str(tmp_path), "10g", inode_limit=0)
