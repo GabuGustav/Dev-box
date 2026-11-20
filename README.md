@@ -75,10 +75,10 @@ All workspace endpoints require the `X-DevBox-Key` header.
 | GET | `/api/v1/workspaces` | List the authenticated principal's workspaces |
 | GET | `/api/v1/workspaces/{workspace_id}` | Retrieve an owned workspace |
 | POST | `/api/v1/workspaces/{workspace_id}/start` | Create/start its isolated container and enforce its disk quota |
-| POST | `/api/v1/workspaces/{workspace_id}/stop` | Stop its container, retaining its volume |
+| POST | `/api/v1/workspaces/{workspace_id}/stop` | Stop its container, retaining its workspace data |
 | POST | `/api/v1/workspaces/{workspace_id}/pause` | Pause a running container |
 | POST | `/api/v1/workspaces/{workspace_id}/resume` | Resume a paused/stopped container |
-| DELETE | `/api/v1/workspaces/{workspace_id}` | Remove its container and persistent volume |
+| DELETE | `/api/v1/workspaces/{workspace_id}` | Remove its container and workspace data |
 
 Example start request:
 
