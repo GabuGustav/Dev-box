@@ -96,3 +96,24 @@ def test_deleted_workspace_cannot_restart(client, monkeypatch):
     response = client.post(f"/api/v1/workspaces/{workspace_id}/start")
     assert response.status_code == 409
     assert [call[0] for call in executor.calls] == ["delete"]
+
+def test_other_principal_cannot_read_or_mutate_any_workspace_state(client, monkeypatch):
+    executor = FakeExecutor()
+    monkeypatch.setattr(workspace_routes, "executor_client", executor)
+    workspace_id = create_workspace(client)
+    headers = auth_headers("test-key-two")
+
+    requests = [
+        ("get", f"/api/v1/workspaces/{workspace_id}"),
+        ("post", f"/api/v1/workspaces/{workspace_id}/start"),
+        ("post", f"/api/v1/workspaces/{workspace_id}/stop"),
+        ("post", f"/api/v1/workspaces/{workspace_id}/pause"),
+        ("post", f"/api/v1/workspaces/{workspace_id}/resume"),
+        ("delete", f"/api/v1/workspaces/{workspace_id}"),
+    ]
+
+    for method, path in requests:
+        response = getattr(client, method)(path, headers=headers)
+        assert response.status_code == 404
+
+    assert executor.calls == []
