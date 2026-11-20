@@ -154,6 +154,8 @@ class SnapshotStore:
         name = member.name
         if "\x00" in name or "\\" in name or name.startswith("/"):
             raise SnapshotError("Snapshot contains an unsafe archive path.")
+        if ".." in name.split("/"):
+            raise SnapshotError("Snapshot path contains a parent-directory component.")
         normalized = posixpath.normpath(name)
         if normalized in ("", "."):
             return "."
@@ -366,11 +368,24 @@ class SnapshotStore:
         for root, directories, files in os.walk(staging, topdown=True, followlinks=False):
             for name in directories + files:
                 path = Path(root) / name
-                if path.is_symlink():
-                    self.storage.owner_setter(path, 10001, 10001)
-                else:
+                if not path.is_symlink():
                     self.storage.owner_setter(path, 10001, 10001)
             self.storage.owner_setter(Path(root), 10001, 10001)
+
+    def recover_restore(self, workspace_id: str) -> None:
+        _, workspace_directory = self.storage._workspace_path(workspace_id)
+        stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
+        backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
+        for path in (stage, backup):
+            if path.is_symlink():
+                raise SnapshotError("Restore recovery path is an unexpected symbolic link.")
+        if backup.exists():
+            if workspace_directory.exists():
+                shutil.rmtree(backup)
+            else:
+                os.replace(backup, workspace_directory)
+        if stage.exists():
+            shutil.rmtree(stage)
 
     def restore(self, workspace_id: str, snapshot_id: str, workspace_path: Path) -> dict:
         encrypted_path, expected_hash = self._snapshot_record(workspace_id, snapshot_id)
@@ -381,13 +396,11 @@ class SnapshotStore:
         if not hmac_compare(digest.hexdigest(), expected_hash):
             raise SnapshotError("Snapshot checksum verification failed.")
 
+        self.recover_restore(workspace_id)
         _, workspace_directory = self.storage._workspace_path(workspace_id)
         project_id = self.storage._project_id(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
         backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
-        if stage.exists() or stage.is_symlink() or backup.exists() or backup.is_symlink():
-            raise SnapshotError("An interrupted restore requires operator recovery.")
-        stage.mkdir(mode=0o700)
         try:
             self.storage.prepare_project_directory(workspace_id, stage, project_id)
             self._extract(encrypted_path, workspace_id, snapshot_id, stage)
