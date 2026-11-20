@@ -37,7 +37,9 @@ class FakeRunner:
 def make_storage(tmp_path: Path, runner: FakeRunner) -> XFSWorkspaceStorage:
     root = tmp_path / "xfs-workspaces"
     root.mkdir(parents=True)
-    return XFSWorkspaceStorage(str(root), "10g", runner=runner)
+    return XFSWorkspaceStorage(
+        str(root), "10g", runner=runner, owner_setter=lambda *_: None
+    )
 
 
 def test_xfs_backend_requires_xfs_and_project_quota_enforcement(tmp_path):
@@ -147,3 +149,20 @@ def test_workspace_storage_must_be_the_mountpoint_not_a_subdirectory(tmp_path):
 def test_workspace_storage_root_rejects_unsafe_command_characters(tmp_path):
     with pytest.raises(WorkspaceStorageError, match="unsafe command characters"):
         XFSWorkspaceStorage(str(tmp_path / "unsafe path"), "10g")
+
+def test_workspace_directory_is_owned_by_the_unprivileged_runtime_user(tmp_path):
+    runner = FakeRunner()
+    root = tmp_path / "xfs-workspaces"
+    root.mkdir()
+    ownership = []
+    storage = XFSWorkspaceStorage(
+        str(root),
+        "10g",
+        runner=runner,
+        owner_setter=lambda path, uid, gid: ownership.append((path, uid, gid)),
+    )
+
+    directory = storage.ensure_workspace(WORKSPACE_ID)
+
+    assert ownership == [(directory, 10001, 10001)]
+    assert directory.stat().st_mode & 0o777 == 0o700
