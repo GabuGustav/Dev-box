@@ -270,3 +270,43 @@ def test_missing_encrypted_file_is_detected_from_snapshot_metadata(tmp_path):
     assert store.list(WORKSPACE_ID) == []
     with pytest.raises(SnapshotError, match="not found"):
         store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+
+
+def test_snapshot_size_limit_cleans_partial_encrypted_archive(tmp_path):
+    workspace_storage = make_storage(tmp_path / "workspace-data")
+    snapshot_storage = make_storage(tmp_path / "snapshot-data")
+    store = SnapshotStore(
+        snapshot_storage,
+        workspace_storage,
+        secrets.token_urlsafe(32),
+        max_snapshot_bytes=128,
+    )
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "large.txt").write_bytes(b"x" * 4096)
+
+    with pytest.raises(SnapshotError, match="size limit"):
+        store.create(WORKSPACE_ID, workspace)
+
+    snapshot_directory = store.storage._workspace_path(WORKSPACE_ID)[1]
+    assert not list(snapshot_directory.glob("*.dbxsnap"))
+    assert not list(snapshot_directory.glob("*.dbxsnap.tmp"))
+    assert store.list(WORKSPACE_ID) == []
+
+
+def test_snapshot_entry_limit_is_enforced(tmp_path):
+    workspace_storage = make_storage(tmp_path / "workspace-data")
+    snapshot_storage = make_storage(tmp_path / "snapshot-data")
+    store = SnapshotStore(
+        snapshot_storage,
+        workspace_storage,
+        secrets.token_urlsafe(32),
+        max_entries=1,
+    )
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "one.txt").write_text("one", encoding="utf-8")
+
+    with pytest.raises(SnapshotError, match="entry limit"):
+        store.create(WORKSPACE_ID, workspace)
+
+    assert store.list(WORKSPACE_ID) == []
