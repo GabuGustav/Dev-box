@@ -72,7 +72,7 @@ def test_workspace_provisioning_sets_a_hard_project_quota(tmp_path):
             "xfs_quota",
             "-x",
             "-c",
-            f"limit -p bhard=10g {storage._project_id(WORKSPACE_ID)}",
+            f"limit -p bhard=10g ihard=200000 {storage._project_id(WORKSPACE_ID)}",
             str(storage.root),
         ],
     ]
