@@ -458,19 +458,22 @@ class SnapshotStore:
         for path in (stage, backup):
             if path.is_symlink() or (path.exists() and not path.is_dir()):
                 raise SnapshotError("Restore recovery path is not a safe directory.")
-        if backup.exists():
-            if workspace_directory.exists():
-                self.workspace_storage.mark_workspace_initialized(
-                    workspace_id, workspace_directory
-                )
-                shutil.rmtree(backup)
-            else:
-                os.replace(backup, workspace_directory)
-                self.workspace_storage.mark_workspace_initialized(
-                    workspace_id, workspace_directory
-                )
-        if stage.exists():
-            shutil.rmtree(stage)
+        try:
+            if backup.exists():
+                if workspace_directory.exists():
+                    self.workspace_storage.mark_workspace_initialized(
+                        workspace_id, workspace_directory
+                    )
+                    shutil.rmtree(backup)
+                else:
+                    os.replace(backup, workspace_directory)
+                    self.workspace_storage.mark_workspace_initialized(
+                        workspace_id, workspace_directory
+                    )
+            if stage.exists():
+                shutil.rmtree(stage)
+        except OSError as exc:
+            raise SnapshotError("Unable to recover interrupted workspace restore.") from exc
 
     def restore(self, workspace_id: str, snapshot_id: str, workspace_path: Path) -> dict:
         self._require_key()
