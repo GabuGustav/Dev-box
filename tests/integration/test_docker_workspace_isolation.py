@@ -134,7 +134,8 @@ def test_workspace_containers_have_private_process_namespaces():
             "marker='DEVBOX_'+'AGENT_B_'+'PROCESS_MARKER'; "
             "visible=False; "
             "paths=Path('/proc').glob('[0-9]*/cmdline'); "
-            "exec(\"for p in paths:\\n try:\\n  visible |= marker.encode() in p.read_bytes()\\n except OSError:\\n  pass\"); "
+            "exec(\"for p in paths:\\n try:\\n  visible |= "
+            "marker.encode() in p.read_bytes()\\n except OSError:\\n  pass\"); "
             "assert not visible",
         )
         assert output == b""
