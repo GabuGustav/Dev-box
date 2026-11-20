@@ -35,13 +35,13 @@ This roadmap sequences the project so each phase produces a testable result. Est
 - [x] Add executor unit tests for workspace ID scoping, token authentication, and hardened container settings.
 - [x] Enforce per-workspace XFS hard block and inode quotas; fail closed on unsupported storage.
 - [x] Implement encrypted snapshot create, list, restore, and delete with separate XFS quotas and archive path validation.
-- [ ] Verify volume persistence and worker recovery using Docker integration tests.
+- [ ] Verify workspace persistence and periodic worker recovery using Docker integration tests.
 - [ ] Add adversarial cross-container filesystem/process isolation tests.
 - [ ] Add execution wall-clock limits with the job runner in Phase 4.
 
 **Current Phase 2 boundary:** the executor creates persistent XFS-backed workspace directories with hard block and inode limits, applies container-level hardening, and supports encrypted snapshots on a separate quota-limited XFS mount. Workspaces have no network access yet, so repository cloning and dependency installation wait for controlled egress in Phase 3.
 
-**Exit criteria:** not yet met. Snapshot implementation is committed, but real XFS/Docker integration runs, backup/restore drills, background reconciliation, and adversarial isolation testing are still required.
+**Exit criteria:** not yet met. Snapshot implementation and periodic unsafe-mount reconciliation are committed, but real XFS/Docker integration runs, backup/restore drills, and adversarial isolation testing are still required.
 
 ## Phase 3 — Git and repository discovery
 
