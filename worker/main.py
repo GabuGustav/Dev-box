@@ -224,8 +224,7 @@ def pause_workspace(workspace_id: str) -> dict:
 def resume_workspace(workspace_id: str) -> dict:
     container_name, storage_name = names_for(workspace_id)
     try:
-        if snapshot_store is not None:
-            snapshot_store.recover_restore(workspace_id)
+        snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
     except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
