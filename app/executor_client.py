@@ -21,6 +21,7 @@ class ExecutorClient:
                 f"{self.base_url}{path}",
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=30.0,
+                trust_env=False,
             )
             response.raise_for_status()
             return response.json()
