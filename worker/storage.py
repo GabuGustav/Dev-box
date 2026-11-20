@@ -174,11 +174,17 @@ class XFSWorkspaceStorage:
     def ensure_workspace(self, workspace_id: str) -> Path:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
-        if not self.registry.exists() and any(self.root.iterdir()):
-            raise WorkspaceStorageError(
-                "Workspace registry is missing while storage data exists; "
-                "recover the registry before provisioning."
-            )
+        if not self.registry.exists():
+            unexpected_entries = [
+                entry
+                for entry in self.root.iterdir()
+                if entry.name != "lost+found" or entry.is_symlink() or not entry.is_dir()
+            ]
+            if unexpected_entries:
+                raise WorkspaceStorageError(
+                    "Workspace registry is missing while storage data exists; "
+                    "recover the registry before provisioning."
+                )
         project_id, initialized = self._register_project(workspace_id, directory)
         directory_existed = directory.exists()
         if initialized and not directory_existed:
