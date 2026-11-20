@@ -173,3 +173,58 @@ def test_workspace_directory_is_owned_by_the_unprivileged_runtime_user(tmp_path)
 def test_nonpositive_inode_limit_is_rejected(tmp_path):
     with pytest.raises(WorkspaceStorageError, match="inode limit"):
         XFSWorkspaceStorage(str(tmp_path), "10g", inode_limit=0)
+
+
+def test_xfs_project_tree_is_initialized_once_across_restarts(tmp_path):
+    runner = FakeRunner()
+    storage = make_storage(tmp_path, runner)
+
+    directory = storage.ensure_workspace(WORKSPACE_ID)
+    storage.ensure_workspace(WORKSPACE_ID)
+
+    commands = [call[0][3] for call in runner.calls if call[0][0] == "xfs_quota"]
+    assert commands.count(
+        f"project -s -p {directory} {storage._project_id(WORKSPACE_ID)}"
+    ) == 1
+    assert commands.count(
+        f"limit -p bhard=10g ihard=200000 {storage._project_id(WORKSPACE_ID)}"
+    ) == 2
+
+
+def test_missing_workspace_directory_is_reinitialized(tmp_path):
+    runner = FakeRunner()
+    storage = make_storage(tmp_path, runner)
+    directory = storage.ensure_workspace(WORKSPACE_ID)
+    directory.rmdir()
+
+    storage.ensure_workspace(WORKSPACE_ID)
+
+    commands = [call[0][3] for call in runner.calls if call[0][0] == "xfs_quota"]
+    assert commands.count(
+        f"project -s -p {directory} {storage._project_id(WORKSPACE_ID)}"
+    ) == 2
+
+
+def test_registry_schema_upgrades_older_project_table(tmp_path):
+    runner = FakeRunner()
+    storage = make_storage(tmp_path, runner)
+    connection = __import__("sqlite3").connect(storage.registry)
+    try:
+        connection.execute(
+            "CREATE TABLE workspace_projects ("
+            "workspace_id TEXT PRIMARY KEY, "
+            "project_id INTEGER NOT NULL UNIQUE, "
+            "directory TEXT NOT NULL UNIQUE)"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    connection = storage._connect()
+    try:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(workspace_projects)")
+        }
+        assert "initialized" in columns
+    finally:
+        connection.close()
