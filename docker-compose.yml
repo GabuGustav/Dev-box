@@ -28,11 +28,18 @@ services:
       DEVBOX_WORKSPACE_STORAGE_ROOT: ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
       DEVBOX_WORKSPACE_DISK_QUOTA: ${WORKSPACE_DISK_QUOTA:-10g}
       DEVBOX_WORKSPACE_INODE_LIMIT: ${WORKSPACE_INODE_LIMIT:-200000}
+      DEVBOX_SNAPSHOT_STORAGE_ROOT: ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
+      DEVBOX_SNAPSHOT_DISK_QUOTA: ${SNAPSHOT_DISK_QUOTA:-20g}
+      DEVBOX_SNAPSHOT_INODE_LIMIT: ${SNAPSHOT_INODE_LIMIT:-50000}
+      DEVBOX_SNAPSHOT_ENCRYPTION_KEY: ${SNAPSHOT_ENCRYPTION_KEY:-}
+      DEVBOX_SNAPSHOT_MAX_COUNT: ${SNAPSHOT_MAX_COUNT:-10}
+      DEVBOX_SNAPSHOT_MAX_BYTES: ${SNAPSHOT_MAX_BYTES:-10737418240}
     cap_add:
       - SYS_ADMIN
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
+      - ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}:${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
       interval: 5s
