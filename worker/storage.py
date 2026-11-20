@@ -349,7 +349,8 @@ class XFSWorkspaceStorage:
         connection = self._connect()
         try:
             row = connection.execute(
-                "SELECT project_id, directory FROM workspace_projects WHERE workspace_id = ?",
+                "SELECT project_id, directory, device, inode "
+                "FROM workspace_projects WHERE workspace_id = ?",
                 (workspace_id,),
             ).fetchone()
         finally:
@@ -359,6 +360,12 @@ class XFSWorkspaceStorage:
             if row[1] != str(directory):
                 raise WorkspaceStorageError("Workspace storage registry path mismatch.")
             if directory.exists():
+                directory_stat = directory.stat(follow_symlinks=False)
+                if row[2] is not None and row[3] is not None:
+                    if (directory_stat.st_dev, directory_stat.st_ino) != (row[2], row[3]):
+                        raise WorkspaceStorageError(
+                            "Workspace directory identity changed; refusing deletion."
+                        )
                 self._run(
                     "xfs_quota",
                     "-x",
