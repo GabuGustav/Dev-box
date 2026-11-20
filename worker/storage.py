@@ -109,25 +109,35 @@ class XFSWorkspaceStorage:
             """CREATE TABLE IF NOT EXISTS workspace_projects (
                 workspace_id TEXT PRIMARY KEY,
                 project_id INTEGER NOT NULL UNIQUE,
-                directory TEXT NOT NULL UNIQUE
+                directory TEXT NOT NULL UNIQUE,
+                initialized INTEGER NOT NULL DEFAULT 0
             )"""
         )
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(workspace_projects)")
+        }
+        if "initialized" not in columns:
+            connection.execute(
+                "ALTER TABLE workspace_projects "
+                "ADD COLUMN initialized INTEGER NOT NULL DEFAULT 0"
+            )
         return connection
 
-    def _register_project(self, workspace_id: str, directory: Path) -> int:
+    def _register_project(self, workspace_id: str, directory: Path) -> tuple[int, bool]:
         project_id = self._project_id(workspace_id)
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT project_id, directory FROM workspace_projects WHERE workspace_id = ?",
+                "SELECT project_id, directory, initialized "
+                "FROM workspace_projects WHERE workspace_id = ?",
                 (workspace_id,),
             ).fetchone()
             if existing:
                 if existing[1] != str(directory):
                     raise WorkspaceStorageError("Workspace storage registry path mismatch.")
                 connection.commit()
-                return int(existing[0])
+                return int(existing[0]), bool(existing[2])
             collision = connection.execute(
                 "SELECT workspace_id FROM workspace_projects WHERE project_id = ?",
                 (project_id,),
@@ -137,15 +147,25 @@ class XFSWorkspaceStorage:
                     "XFS project ID collision; refusing to share a disk quota."
                 )
             connection.execute(
-                "INSERT INTO workspace_projects(workspace_id, project_id, directory) "
-                "VALUES (?, ?, ?)",
+                "INSERT INTO workspace_projects(workspace_id, project_id, directory, initialized) "
+                "VALUES (?, ?, ?, 0)",
                 (workspace_id, project_id, str(directory)),
             )
             connection.commit()
-            return project_id
+            return project_id, False
         except Exception:
             connection.rollback()
             raise
+        finally:
+            connection.close()
+
+    def _set_initialized(self, workspace_id: str, initialized: bool) -> None:
+        connection = self._connect()
+        try:
+            connection.execute(
+                "UPDATE workspace_projects SET initialized = ? WHERE workspace_id = ?",
+                (int(initialized), workspace_id),
+            )
         finally:
             connection.close()
 
@@ -157,7 +177,11 @@ class XFSWorkspaceStorage:
                 "Workspace registry is missing while storage data exists; "
                 "recover the registry before provisioning."
             )
-        project_id = self._register_project(workspace_id, directory)
+        project_id, initialized = self._register_project(workspace_id, directory)
+        directory_existed = directory.exists()
+        if initialized and not directory_existed:
+            self._set_initialized(workspace_id, False)
+            initialized = False
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink() or directory.resolve().parent != self.root.resolve():
             raise WorkspaceStorageError("Workspace storage directory escaped its root.")
@@ -168,13 +192,15 @@ class XFSWorkspaceStorage:
             raise WorkspaceStorageError(
                 "Unable to assign workspace directory ownership to the unprivileged runtime user."
             ) from exc
-        self._run(
-            "xfs_quota",
-            "-x",
-            "-c",
-            f"project -s -p {directory} {project_id}",
-            str(self.root),
-        )
+        if not initialized:
+            self._run(
+                "xfs_quota",
+                "-x",
+                "-c",
+                f"project -s -p {directory} {project_id}",
+                str(self.root),
+            )
+            self._set_initialized(workspace_id, True)
         self._run(
             "xfs_quota",
             "-x",
