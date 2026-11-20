@@ -205,3 +205,90 @@ def test_resume_rejects_existing_container_with_legacy_mount(monkeypatch, tmp_pa
     assert error.value.status_code == 409
     assert existing.started is False
     assert storage.ensured == ["dbx_abcdefghijklmnopqrstuv"]
+
+
+
+class ReconcileContainer:
+    def __init__(self, name, workspace_id, source, status="running"):
+        self.id = f"id-{name}"
+        self.name = name
+        self.status = status
+        self.attrs = {
+            "Config": {
+                "Labels": {
+                    "devbox.managed": "true",
+                    "devbox.workspace_id": workspace_id,
+                }
+            },
+            "Mounts": [{"Destination": "/workspace", "Source": source}],
+        }
+        self.stopped = False
+
+    def reload(self):
+        return None
+
+    def stop(self, timeout):
+        self.stopped = True
+        self.status = "exited"
+
+    def unpause(self):
+        self.status = "running"
+
+
+class ReconcileContainers:
+    def __init__(self, containers):
+        self.items = containers
+
+    def list(self, **kwargs):
+        assert kwargs == {"all": True, "filters": {"label": "devbox.managed=true"}}
+        return self.items
+
+
+class ReconcileDockerClient:
+    def __init__(self, containers):
+        self.containers = ReconcileContainers(containers)
+
+
+def test_reconciliation_stops_only_containers_with_invalid_workspace_mounts(
+    monkeypatch, tmp_path
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    valid = ReconcileContainer(
+        executor.names_for(workspace_id)[0], workspace_id, str(tmp_path / "workspace")
+    )
+    invalid = ReconcileContainer(
+        "devbox-ws-wrong", workspace_id, str(tmp_path / "wrong-workspace")
+    )
+    monkeypatch.setattr(executor, "docker_client", ReconcileDockerClient([valid, invalid]))
+
+    class Storage:
+        def ensure_workspace(self, requested_id):
+            assert requested_id == workspace_id
+            return tmp_path / "workspace"
+
+    monkeypatch.setattr(executor, "workspace_storage", Storage())
+
+    stopped = executor.reconcile_managed_containers()
+
+    assert stopped == 1
+    assert valid.stopped is False
+    assert invalid.stopped is True
+
+
+def test_reconciliation_stops_container_when_workspace_storage_is_unavailable(monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    container = ReconcileContainer(
+        executor.names_for(workspace_id)[0], workspace_id, "/srv/devbox/workspaces/path"
+    )
+    monkeypatch.setattr(executor, "docker_client", ReconcileDockerClient([container]))
+
+    class UnavailableStorage:
+        def ensure_workspace(self, requested_id):
+            raise RuntimeError("XFS mount unavailable")
+
+    monkeypatch.setattr(executor, "workspace_storage", UnavailableStorage())
+
+    stopped = executor.reconcile_managed_containers()
+
+    assert stopped == 1
+    assert container.stopped is True
