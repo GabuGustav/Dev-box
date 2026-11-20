@@ -240,6 +240,6 @@ def delete_workspace(workspace_id: str) -> dict:
     return {
         "workspace_id": workspace_id,
         "container_id": None,
-        "volume_name": volume_name,
+        "storage_ref": volume_name,
         "state": "deleted",
     }
