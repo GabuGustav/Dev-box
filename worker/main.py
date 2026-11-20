@@ -37,26 +37,17 @@ workspace_storage = XFSWorkspaceStorage(
 snapshot_storage = XFSWorkspaceStorage(
     SNAPSHOT_STORAGE_ROOT, SNAPSHOT_DISK_QUOTA, SNAPSHOT_INODE_LIMIT
 )
-snapshot_store = (
-    SnapshotStore(
-        snapshot_storage,
-        workspace_storage,
-        SNAPSHOT_ENCRYPTION_KEY,
-        max_snapshots=SNAPSHOT_MAX_COUNT,
-        max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
-    )
-    if SNAPSHOT_ENCRYPTION_KEY
-    else None
+snapshot_store = SnapshotStore(
+    snapshot_storage,
+    workspace_storage,
+    SNAPSHOT_ENCRYPTION_KEY,
+    max_snapshots=SNAPSHOT_MAX_COUNT,
+    max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
 )
 docker_client = docker.from_env()
 
 
 def require_snapshot_store() -> SnapshotStore:
-    if snapshot_store is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Encrypted snapshots are unavailable; configure the snapshot encryption key.",
-        )
     return snapshot_store
 
 
@@ -113,8 +104,7 @@ def health() -> dict[str, str]:
 def start_workspace(workspace_id: str) -> dict:
     container_name, storage_name = names_for(workspace_id)
     try:
-        if snapshot_store is not None:
-            snapshot_store.recover_restore(workspace_id)
+        snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
     except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -395,8 +385,7 @@ def delete_workspace(workspace_id: str) -> dict:
     except NotFound:
         pass
     try:
-        if snapshot_store is not None:
-            snapshot_store.delete_workspace(workspace_id)
+        snapshot_store.delete_workspace(workspace_id)
         workspace_storage.delete_workspace(workspace_id)
     except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
