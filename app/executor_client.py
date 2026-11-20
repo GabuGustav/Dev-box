@@ -7,6 +7,12 @@ class ExecutorUnavailable(RuntimeError):
     pass
 
 
+class ExecutorRejected(RuntimeError):
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+
+
 class ExecutorClient:
     def __init__(self) -> None:
         self.base_url = settings.executor_service_url.rstrip("/")
@@ -23,8 +29,16 @@ class ExecutorClient:
                 timeout=timeout,
                 trust_env=False,
             )
+            if 400 <= response.status_code < 500:
+                try:
+                    detail = response.json().get("detail", "Executor rejected the request.")
+                except ValueError:
+                    detail = "Executor rejected the request."
+                raise ExecutorRejected(response.status_code, str(detail))
             response.raise_for_status()
             return response.json()
+        except ExecutorRejected:
+            raise
         except (httpx.HTTPError, ValueError) as exc:
             raise ExecutorUnavailable("Workspace executor is unavailable.") from exc
 
