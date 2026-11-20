@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import os
 import posixpath
 import re
 import shutil
 import sqlite3
-import struct
 import tarfile
 import uuid
 from datetime import UTC, datetime
