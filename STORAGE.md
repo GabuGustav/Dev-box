@@ -8,7 +8,7 @@ This is the selected production backend. The ordinary Docker local named-volume 
 
 ## Host requirements
 
-- Linux host with an XFS filesystem dedicated to DevBox workspace data.
+- Linux host with one dedicated XFS filesystem for workspace data and a second dedicated XFS filesystem for encrypted snapshots.
 - The filesystem mounted with prjquota (or pquota).
 - Project quota accounting and enforcement both enabled.
 - xfsprogs and findmnt available in the worker image.
@@ -31,7 +31,7 @@ sudo mount /srv/devbox/workspaces
 findmnt -no TARGET,FSTYPE,OPTIONS /srv/devbox/workspaces
 ```
 
-The last command must show the exact mountpoint, xfs, and prjquota or pquota.
+The last command must show the exact mountpoint, xfs, and prjquota or pquota. Repeat the setup for the snapshot mount at `/srv/devbox/snapshots`; it must be a separate dedicated XFS filesystem with project quotas enabled.
 
 Configure:
 
@@ -39,9 +39,18 @@ Configure:
 WORKSPACE_STORAGE_ROOT=/srv/devbox/workspaces
 WORKSPACE_DISK_QUOTA=10g
 WORKSPACE_INODE_LIMIT=200000
+
+SNAPSHOT_STORAGE_ROOT=/srv/devbox/snapshots
+SNAPSHOT_DISK_QUOTA=20g
+SNAPSHOT_INODE_LIMIT=50000
+SNAPSHOT_MAX_COUNT=10
+SNAPSHOT_MAX_BYTES=10737418240
+SNAPSHOT_ENCRYPTION_KEY=<32-byte-url-safe-base64-key>
 ```
 
-The host directory must exist and already be mounted. Compose bind-mounts it into the worker using the same path. If a different path is selected, use that exact path in .env.
+Generate the encryption key once with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Store it in a secret manager or protected deployment environment, and keep a secure backup separate from the snapshot filesystem. Losing this key makes the snapshots permanently unrecoverable; changing it without re-encrypting existing snapshots has the same effect.
+
+Both host directories must exist and already be mounted. Compose bind-mounts them into the worker using the same absolute paths. The snapshot filesystem is separate so snapshot retention cannot consume the live workspace filesystem's capacity. If custom paths are selected, use those exact paths in .env.
 
 ## Provisioning contract
 
@@ -65,13 +74,27 @@ The API's storage_ref is an opaque backend reference, not a Docker volume name o
 - **Delete:** remove the workspace container first, clear the XFS project tree and quota, remove the directory, and release its registry entry.
 - **Legacy named-volume workspace:** the worker refuses to start an existing container whose /workspace mount does not match the XFS directory. Its old Docker volume is not automatically deleted or migrated.
 
+## Encrypted snapshots
+
+Snapshots are stored on the separate XFS snapshot filesystem, in a separate per-workspace project-quota directory. Each archive is streamed through AES-256-GCM encryption; the workspace ID and snapshot ID are authenticated as additional data. The metadata registry records the encrypted file's SHA-256 digest, timestamp, and size. Default policy is at most 10 snapshots per workspace and a 10 GiB maximum plaintext archive per snapshot, subject to the separate 20 GiB per-workspace snapshot quota.
+
+- `POST /api/v1/workspaces/{workspace_id}/snapshots` creates a snapshot. If its container is running, the executor pauses it while archiving and then unpauses it.
+- `GET /api/v1/workspaces/{workspace_id}/snapshots` lists snapshots owned by the authenticated principal.
+- `POST /api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}/restore` restores a snapshot. The workspace must be stopped; a running or paused workspace is rejected.
+- `DELETE /api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}` deletes one snapshot.
+- Deleting a workspace also deletes its stored snapshots.
+
+Restore decrypts into a separate staging directory assigned the same XFS project quota as the workspace. It validates every archive path, rejects absolute paths, parent traversal, special files, hard links, and escaping symlinks, verifies the AES-GCM authentication tag, then swaps the restored tree into place. An interrupted directory swap is reconciled on the next start/resume request.
+
+The snapshot registry and encrypted files must be backed up together. Keep the encryption key separately. Snapshots protect confidentiality at rest but do not guarantee that repository files contain no credentials: any credentials already written inside the workspace will be included in its encrypted snapshot. The worker necessarily handles plaintext while creating/restoring archives; its host and snapshot mount must be trusted.
+
 ## Limits and boundaries
 
 - The block quota applies to data stored beneath /workspace.
 - The inode quota limits file and directory count, reducing small-file exhaustion.
 - /tmp and /run are separate bounded tmpfs mounts (64 MiB and 16 MiB respectively); they are not part of the workspace's XFS block quota.
 - Container CPU, memory, PID, and network restrictions remain independent controls.
-- Snapshot/restore and quota-aware backup/restore drills are still pending. Opt-in XFS quota and Docker persistence/isolation integration tests exist, but have not yet been verified on a dedicated Linux host.
+- Snapshot create/list/restore/delete are implemented with encrypted, quota-limited storage. Backup/restore drills and real-host integration verification are still pending. Opt-in XFS quota and Docker persistence/isolation tests exist but have not yet been verified on a dedicated Linux host.
 - This backend is not supported on Docker Desktop's ordinary VM filesystem. Use Docker Desktop for API development and mocked tests; use a Linux XFS host to validate actual workspace provisioning.
 
 ## Operational cautions
@@ -85,7 +108,7 @@ Do not call this container-level isolation a VM boundary. For hostile multi-tena
 
 The worker service is configured to restart unless explicitly stopped. Workspace containers are independently managed by Docker and use a deterministic name plus a restart policy. After a worker restart, an API start/resume request finds the existing container, verifies that its /workspace bind mount still points at the expected XFS directory, and reuses it. A container with a legacy or unexpected mount is rejected without deleting its old data.
 
-This is request-driven recovery, not a background reconciliation controller. The database status can be stale after an abrupt host or daemon failure until the next lifecycle request. Automatic reconciliation and durable snapshot/restore remain Phase 2 work.
+This is request-driven recovery, not a background reconciliation controller. The database status can be stale after an abrupt host or daemon failure until the next lifecycle request. Snapshot restore staging and backup directories are reconciled on the next start/resume request.
 
 Optional integration tests:
 
