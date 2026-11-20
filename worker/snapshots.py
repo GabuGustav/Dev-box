@@ -414,6 +414,7 @@ class SnapshotStore:
             self.workspace_storage.owner_setter(Path(root), 10001, 10001)
 
     def recover_restore(self, workspace_id: str) -> None:
+        self.workspace_storage.validate_backend()
         _, workspace_directory = self.workspace_storage._workspace_path(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
         backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
