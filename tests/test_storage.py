@@ -238,7 +238,6 @@ def test_registry_schema_upgrades_older_project_table(tmp_path):
         connection.close()
 
 
-
 def test_fresh_xfs_lost_found_directory_does_not_block_provisioning(tmp_path):
     runner = FakeRunner()
     storage = make_storage(tmp_path, runner)
@@ -247,7 +246,6 @@ def test_fresh_xfs_lost_found_directory_does_not_block_provisioning(tmp_path):
     directory = storage.ensure_workspace(WORKSPACE_ID)
 
     assert directory.is_dir()
-
 
 
 def test_restore_quota_multiplier_scales_block_and_inode_limits(tmp_path):
