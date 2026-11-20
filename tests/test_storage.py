@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -55,7 +56,14 @@ def test_xfs_backend_requires_xfs_and_project_quota_enforcement(tmp_path):
 
     accounting_only = FakeRunner(state="Project quota state: Accounting: ON, Enforcement: OFF")
     storage = make_storage(tmp_path / "third", accounting_only)
-    with pytest.raises(WorkspaceStorageError, match="enforcement"):
+    with pytest.raises(WorkspaceStorageError, match="accounting and enforcement"):
+        storage.validate_backend()
+
+    enforcement_only = FakeRunner(
+        state="Project quota state: Accounting: OFF, Enforcement: ON"
+    )
+    storage = make_storage(tmp_path / "fourth", enforcement_only)
+    with pytest.raises(WorkspaceStorageError, match="accounting and enforcement"):
         storage.validate_backend()
 
 
@@ -208,7 +216,7 @@ def test_missing_workspace_directory_is_reinitialized(tmp_path):
 def test_registry_schema_upgrades_older_project_table(tmp_path):
     runner = FakeRunner()
     storage = make_storage(tmp_path, runner)
-    connection = __import__("sqlite3").connect(storage.registry)
+    connection = sqlite3.connect(storage.registry)
     try:
         connection.execute(
             "CREATE TABLE workspace_projects ("
