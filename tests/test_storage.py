@@ -145,5 +145,5 @@ def test_workspace_storage_must_be_the_mountpoint_not_a_subdirectory(tmp_path):
 
 
 def test_workspace_storage_root_rejects_unsafe_command_characters(tmp_path):
-    with pytest.raises(WorkspaceStorageError, match="may contain only"):
+    with pytest.raises(WorkspaceStorageError, match="unsafe command characters"):
         XFSWorkspaceStorage(str(tmp_path / "unsafe path"), "10g")
