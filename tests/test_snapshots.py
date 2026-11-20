@@ -1,11 +1,11 @@
 import hashlib
 import secrets
 import sqlite3
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import tarfile
 
 from worker.snapshots import SnapshotError, SnapshotStore
 from worker.storage import XFSWorkspaceStorage
