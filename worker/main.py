@@ -92,6 +92,7 @@ def start_workspace(workspace_id: str) -> dict:
             detach=True,
             user="10001:10001",
             working_dir="/workspace",
+            environment={"HOME": "/workspace/.home", "TMPDIR": "/tmp"},
             network_mode="none",
             volumes={volume.name: {"bind": "/workspace", "mode": "rw"}},
             mem_limit=WORKSPACE_MEMORY,
@@ -105,6 +106,7 @@ def start_workspace(workspace_id: str) -> dict:
                 "/run": "rw,noexec,nosuid,size=16m",
             },
             init=True,
+            restart_policy={"Name": "unless-stopped"},
             labels={"devbox.managed": "true", "devbox.workspace_id": workspace_id},
         )
     if container.status == "paused":
