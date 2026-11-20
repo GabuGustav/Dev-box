@@ -41,14 +41,17 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 ## Run locally
 
 1. For actual workspace provisioning, use a Linux host with Docker Engine. Docker Desktop on Windows/macOS can be used for API and mocked-test development, but it does not provide the required dedicated XFS host mount.
-2. Prepare a dedicated Linux XFS filesystem for workspace data. Mount it with project quotas enabled (`prjquota` or `pquota`) at `/srv/devbox/workspaces` (or your chosen `WORKSPACE_STORAGE_ROOT`). The mount must already exist before Compose starts and be visible at the same absolute path inside the worker and to the Docker daemon. Do not format a disk that contains data; use a dedicated data volume and follow your host OS's XFS setup procedure.
+2. Prepare two dedicated Linux XFS filesystems: one for workspaces at `/srv/devbox/workspaces`, and one for encrypted snapshots at `/srv/devbox/snapshots`. Mount both with project quotas enabled (`prjquota` or `pquota`). Both mounts must exist before Compose starts and be visible at the same absolute paths inside the worker and to the Docker daemon. Do not format a disk that contains data; use dedicated data volumes and follow your host OS's XFS setup procedure.
 3. Copy `.env.example` to `.env`.
-4. Replace `EXECUTOR_SERVICE_TOKEN` with a fresh random secret. For example:
+4. Set `EXECUTOR_SERVICE_TOKEN` to a fresh random secret and `SNAPSHOT_ENCRYPTION_KEY` to a generated 32-byte URL-safe base64 key. For example:
 
    ```powershell
    python -c "import secrets; print(secrets.token_urlsafe(48))"
+   # For SNAPSHOT_ENCRYPTION_KEY:
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
 
+   Keep the snapshot key backed up securely. Losing it makes existing snapshots unrecoverable.
 5. Start the complete stack:
 
    ```bash
@@ -79,7 +82,11 @@ All workspace endpoints require the `X-DevBox-Key` header.
 | POST | `/api/v1/workspaces/{workspace_id}/stop` | Stop its container, retaining its workspace data |
 | POST | `/api/v1/workspaces/{workspace_id}/pause` | Pause a running container |
 | POST | `/api/v1/workspaces/{workspace_id}/resume` | Resume a paused/stopped container |
-| DELETE | `/api/v1/workspaces/{workspace_id}` | Remove its container and workspace data |
+| DELETE | `/api/v1/workspaces/{workspace_id}` | Remove its container, workspace data, and snapshots |
+| POST | `/api/v1/workspaces/{workspace_id}/snapshots` | Create an encrypted snapshot |
+| GET | `/api/v1/workspaces/{workspace_id}/snapshots` | List snapshots |
+| POST | `/api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}/restore` | Restore a snapshot while the workspace is stopped |
+| DELETE | `/api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}` | Delete a snapshot |
 
 Example start request:
 
@@ -106,7 +113,7 @@ This is container-level isolation, not a VM boundary. The worker supervisor is h
 
 **Storage requirements:** the worker refuses to provision a workspace unless the configured storage root is on XFS with project quota accounting and enforcement enabled. The worker uses `xfs_quota` to assign a unique project ID, a hard block limit, and a hard inode limit before mounting the directory into a workspace container. A SQLite registry prevents two workspaces from accidentally sharing a project ID. The workspace storage root must be mounted into the worker at the same absolute path used by the Docker daemon. Docker Desktop and non-XFS local filesystems are not supported for actual workspace provisioning; use them for API/unit-test development only.
 
-**Known Phase 2 gaps:** snapshot/restore, background worker reconciliation, quota-aware backup/restore drills, and adversarial host-escape tests are not complete. Opt-in XFS quota and Docker persistence/isolation integration tests are provided under `tests/integration`; they require a dedicated test filesystem and are not run by default. The current network isolation prevents repository cloning and dependency downloads; controlled egress will be designed with the Git integration phase. Do not treat this branch as production-hardened multi-tenant infrastructure.
+**Known Phase 2 gaps:** background worker reconciliation, quota-aware backup/restore drills, adversarial host-escape tests, and real-host integration verification remain incomplete. Encrypted snapshot create/list/restore/delete endpoints are implemented; they require a second dedicated XFS snapshot mount and a persistent encryption key. The current network isolation prevents repository cloning and dependency downloads; controlled egress will be designed with the Git integration phase. Do not treat this branch as production-hardened multi-tenant infrastructure.
 
 ## Development checks
 
@@ -120,4 +127,4 @@ The API tests mock the executor service, and executor unit tests mock Docker SDK
 
 ## Next
 
-Complete snapshot/restore, worker crash recovery, and Docker integration/isolation tests before considering Phase 2 complete. Phase 3 will add repository cloning, authorized repository discovery, and Git operations.
+Complete worker crash recovery and Docker integration/isolation tests, and run backup/restore drills before considering Phase 2 complete. Phase 3 will add repository cloning, authorized repository discovery, and Git operations.
