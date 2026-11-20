@@ -243,6 +243,10 @@ def resume_workspace(workspace_id: str) -> dict:
 def delete_workspace(workspace_id: str) -> dict:
     container_name, volume_name = names_for(workspace_id)
     try:
+        workspace_storage.validate_backend()
+    except WorkspaceStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
         container = docker_client.containers.get(container_name)
         container.remove(force=True, v=True)
     except NotFound:
