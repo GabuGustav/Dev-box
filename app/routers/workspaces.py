@@ -51,9 +51,10 @@ def owned_workspace(db: Session, principal: Principal, workspace_id: str) -> Wor
 def execute_lifecycle(
     action: str,
     workspace_id: str,
+    *args: str,
 ) -> dict:
     try:
-        return getattr(executor_client, action)(workspace_id)
+        return getattr(executor_client, action)(workspace_id, *args)
     except ExecutorUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
