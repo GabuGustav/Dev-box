@@ -155,7 +155,6 @@ def test_other_principal_cannot_read_or_mutate_any_workspace_state(client, monke
     assert executor.calls == []
 
 
-
 def test_snapshot_routes_are_owner_scoped_and_update_workspace_state(client, monkeypatch):
     executor = FakeExecutor()
     monkeypatch.setattr(workspace_routes, "executor_client", executor)
