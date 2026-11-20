@@ -50,8 +50,8 @@ For each workspace:
 1. Validate the workspace ID and derive a stable storage directory name from its SHA-256 digest.
 2. Verify the storage root is itself a mountpoint, is XFS, and has project quota enforcement enabled. A directory merely located somewhere on an XFS filesystem is rejected.
 3. Allocate a deterministic 31-bit XFS project ID. A persistent SQLite registry enforces uniqueness and maps the workspace ID, project ID, and directory.
-4. Initialize the XFS project tree with the xfs_quota project -s operation.
-5. Apply bhard and ihard limits before the directory is mounted into the workspace container.
+4. Initialize the XFS project tree once with the xfs_quota project -s operation; record that initialization in the persistent registry.
+5. Reapply bhard and ihard limits before each start/resume, without recursively walking an already initialized tree.
 6. Set the directory owner to UID/GID 10001, then bind-mount only that directory at /workspace.
 
 The registry is stored on the dedicated storage filesystem, outside individual workspace directories. It is required state: if it is missing while other storage data exists, provisioning fails closed. Back up the registry together with the workspace filesystem. Do not manually delete or edit it.
@@ -71,7 +71,7 @@ The API's storage_ref is an opaque backend reference, not a Docker volume name o
 - The inode quota limits file and directory count, reducing small-file exhaustion.
 - /tmp and /run are separate bounded tmpfs mounts (64 MiB and 16 MiB respectively); they are not part of the workspace's XFS block quota.
 - Container CPU, memory, PID, and network restrictions remain independent controls.
-- Snapshot/restore, quota-aware backup/restore drills, and real Docker integration tests are still pending.
+- Snapshot/restore and quota-aware backup/restore drills are still pending. Opt-in XFS quota and Docker persistence/isolation integration tests exist, but have not yet been verified on a dedicated Linux host.
 - This backend is not supported on Docker Desktop's ordinary VM filesystem. Use Docker Desktop for API development and mocked tests; use a Linux XFS host to validate actual workspace provisioning.
 
 ## Operational cautions
