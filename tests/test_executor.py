@@ -83,6 +83,14 @@ class FakeDockerClient:
         self.containers = FakeContainers()
 
 
+class FakeSnapshotStore:
+    def recover_restore(self, workspace_id):
+        return None
+
+    def delete_workspace(self, workspace_id):
+        return None
+
+
 def test_workspace_resource_names_are_stable_and_scoped():
     first = executor.names_for("dbx_abcdefghijklmnopqrstuv")
     second = executor.names_for("dbx_abcdefghijklmnopqrstuv")
@@ -112,6 +120,7 @@ def test_start_creates_hardened_container_on_workspace_storage(monkeypatch, tmp_
     storage_path = tmp_path / "workspace"
     storage_path.mkdir()
     monkeypatch.setattr(executor, "workspace_storage", FakeStorage(storage_path))
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
 
     result = executor.start_workspace("dbx_abcdefghijklmnopqrstuv")
 
@@ -153,6 +162,7 @@ def test_resume_reapplies_quota_and_validates_xfs_mount(monkeypatch, tmp_path):
     storage_path.mkdir()
     storage = FakeStorage(storage_path)
     monkeypatch.setattr(executor, "workspace_storage", storage)
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
     existing = FakeContainer()
     existing.status = "exited"
     existing.attrs = {
@@ -267,6 +277,7 @@ def test_reconciliation_stops_only_containers_with_invalid_workspace_mounts(
             return tmp_path / "workspace"
 
     monkeypatch.setattr(executor, "workspace_storage", Storage())
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
 
     stopped = executor.reconcile_managed_containers()
 
@@ -287,6 +298,7 @@ def test_reconciliation_stops_container_when_workspace_storage_is_unavailable(mo
             raise RuntimeError("XFS mount unavailable")
 
     monkeypatch.setattr(executor, "workspace_storage", UnavailableStorage())
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
 
     stopped = executor.reconcile_managed_containers()
 
