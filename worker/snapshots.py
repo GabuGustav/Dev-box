@@ -105,16 +105,18 @@ class SnapshotStore:
         max_snapshot_bytes: int = 10 * 1024 * 1024 * 1024,
         max_entries: int = 200_000,
     ) -> None:
-        if not encryption_key:
-            raise SnapshotError("Snapshot encryption is not configured.")
-        if not re.fullmatch(r"[A-Za-z0-9_-]{43}", encryption_key):
-            raise SnapshotError("Snapshot encryption key must be a 32-byte URL-safe base64 value.")
-        try:
-            key = base64.urlsafe_b64decode(encryption_key + "=")
-        except (ValueError, TypeError) as exc:
-            raise SnapshotError("Snapshot encryption key must be URL-safe base64.") from exc
-        if len(key) != 32:
-            raise SnapshotError("Snapshot encryption key must decode to exactly 32 bytes.")
+        key = None
+        if encryption_key:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{43}", encryption_key):
+                raise SnapshotError(
+                    "Snapshot encryption key must be a 32-byte URL-safe base64 value."
+                )
+            try:
+                key = base64.urlsafe_b64decode(encryption_key + "=")
+            except (ValueError, TypeError) as exc:
+                raise SnapshotError("Snapshot encryption key must be URL-safe base64.") from exc
+            if len(key) != 32:
+                raise SnapshotError("Snapshot encryption key must decode to exactly 32 bytes.")
         if max_snapshots < 1 or max_snapshot_bytes < 1 or max_entries < 1:
             raise SnapshotError("Snapshot limits must be positive.")
         self.storage = storage
@@ -149,6 +151,11 @@ class SnapshotStore:
             raise SnapshotError("Unable to secure the snapshot directory.") from exc
         return directory
 
+    def _require_key(self) -> bytes:
+        if self.key is None:
+            raise SnapshotError("Snapshot encryption key is not configured.")
+        return self.key
+
     def _aad(self, workspace_id: str, snapshot_id: str) -> bytes:
         return f"devbox:{workspace_id}:{snapshot_id}".encode("utf-8")
 
@@ -180,6 +187,7 @@ class SnapshotStore:
         return member
 
     def create(self, workspace_id: str, workspace_path: Path) -> dict:
+        key = self._require_key()
         _, expected_workspace_path = self.workspace_storage._workspace_path(workspace_id)
         if workspace_path != expected_workspace_path:
             raise SnapshotError("Snapshot source does not match the assigned workspace directory.")
@@ -203,7 +211,7 @@ class SnapshotStore:
         temporary_path = snapshot_directory / f".{filename}.tmp"
         nonce = os.urandom(NONCE_SIZE)
         encryptor = Cipher(
-            algorithms.AES(self.key), modes.GCM(nonce)
+            algorithms.AES(key), modes.GCM(nonce)
         ).encryptor()
         encryptor.authenticate_additional_data(self._aad(workspace_id, snapshot_id))
         try:
@@ -253,10 +261,12 @@ class SnapshotStore:
                 "size_bytes": final_path.stat().st_size,
                 "sha256": encrypted_hash.hexdigest(),
             }
-        except Exception:
+        except Exception as exc:
             temporary_path.unlink(missing_ok=True)
             final_path.unlink(missing_ok=True)
-            raise
+            if isinstance(exc, SnapshotError):
+                raise
+            raise SnapshotError("Snapshot creation failed.") from exc
 
     def list(self, workspace_id: str) -> list[dict]:
         self._workspace_directory(workspace_id)
@@ -313,7 +323,7 @@ class SnapshotStore:
         tag = source.read(TAG_SIZE)
         source.seek(len(header))
         decryptor = Cipher(
-            algorithms.AES(self.key), modes.GCM(nonce)
+            algorithms.AES(self._require_key()), modes.GCM(nonce)
         ).decryptor()
         decryptor.authenticate_additional_data(self._aad(workspace_id, snapshot_id))
         return _DecryptingReader(source, decryptor, ciphertext_size, tag)
@@ -388,6 +398,7 @@ class SnapshotStore:
             shutil.rmtree(stage)
 
     def restore(self, workspace_id: str, snapshot_id: str, workspace_path: Path) -> dict:
+        self._require_key()
         _, expected_workspace_path = self.workspace_storage._workspace_path(workspace_id)
         if workspace_path != expected_workspace_path:
             raise SnapshotError("Restore target does not match the assigned workspace directory.")
@@ -422,12 +433,14 @@ class SnapshotStore:
                 "workspace_id": workspace_id,
                 "state": "restored",
             }
-        except Exception:
+        except Exception as exc:
             if stage.exists():
                 shutil.rmtree(stage, ignore_errors=True)
             if backup.exists() and not workspace_directory.exists():
                 os.replace(backup, workspace_directory)
-            raise
+            if isinstance(exc, SnapshotError):
+                raise
+            raise SnapshotError("Snapshot restore failed; the previous workspace was retained.") from exc
 
     def delete(self, workspace_id: str, snapshot_id: str) -> None:
         path, _ = self._snapshot_record(workspace_id, snapshot_id)
