@@ -134,3 +134,29 @@ def test_snapshot_ids_are_scoped_to_the_workspace(tmp_path):
 
     with pytest.raises(SnapshotError, match="not found"):
         store._snapshot_record("dbx_zyxwvutsrqponmlkjihgfe", snapshot["snapshot_id"])
+
+
+
+def test_missing_key_blocks_create_and_restore_but_allows_deletion(tmp_path):
+    workspace_storage = make_storage(tmp_path / "workspace-data")
+    snapshot_storage = make_storage(tmp_path / "snapshot-data")
+    store = SnapshotStore(snapshot_storage, workspace_storage, "")
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+
+    with pytest.raises(SnapshotError, match="key is not configured"):
+        store.create(WORKSPACE_ID, workspace)
+
+    assert store.list(WORKSPACE_ID) == []
+    store.delete_workspace(WORKSPACE_ID)
+    assert not snapshot_storage._workspace_path(WORKSPACE_ID)[1].exists()
+
+
+def test_snapshot_creation_rejects_symlinks_that_escape_workspace(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("do not archive", encoding="utf-8")
+    (workspace / "escape").symlink_to(outside)
+
+    with pytest.raises(SnapshotError, match="symbolic link escapes"):
+        store.create(WORKSPACE_ID, workspace)
