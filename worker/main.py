@@ -125,6 +125,7 @@ def reconcile_managed_containers() -> int:
                 _stop_unsafe_container(container, "container name does not match workspace ID")
                 stopped += 1
                 continue
+            snapshot_store.recover_restore(workspace_id)
             workspace_path = workspace_storage.ensure_workspace(workspace_id)
             mounts = container.attrs.get("Mounts", [])
             workspace_mount = next(
