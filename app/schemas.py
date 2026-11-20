@@ -30,7 +30,6 @@ class PrincipalCreate(BaseModel):
     principal_type: Literal["user", "agent"]
 
 
-
 class SnapshotRead(BaseModel):
     snapshot_id: str
     workspace_id: str
