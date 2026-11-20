@@ -36,7 +36,8 @@ This roadmap sequences the project so each phase produces a testable result. Est
 - [x] Enforce per-workspace XFS hard block and inode quotas; fail closed on unsupported storage.
 - [x] Implement encrypted snapshot create, list, restore, and delete with separate XFS quotas and archive path validation.
 - [ ] Verify workspace persistence and periodic worker recovery using Docker integration tests.
-- [ ] Add adversarial cross-container filesystem/process isolation tests.
+- [x] Add opt-in Docker integration tests for cross-workspace filesystem isolation, private PID namespaces, and persistence.
+- [ ] Run adversarial host-escape and privilege-boundary testing.
 - [ ] Add execution wall-clock limits with the job runner in Phase 4.
 
 **Current Phase 2 boundary:** the executor creates persistent XFS-backed workspace directories with hard block and inode limits, applies container-level hardening, and supports encrypted snapshots on a separate quota-limited XFS mount. Workspaces have no network access yet, so repository cloning and dependency installation wait for controlled egress in Phase 3.
