@@ -85,7 +85,7 @@ def test_workspace_resource_names_are_stable_and_scoped():
     assert first == second
     assert first != other
     assert first[0].startswith("devbox-ws-")
-    assert first[1].startswith("devbox-vol-")
+    assert first[1].startswith("xfs-")
 
 
 @pytest.mark.parametrize("workspace_id", ["", "dbx_short", "../dbx_abcdefghijklmnopqrstuv"])
@@ -111,6 +111,7 @@ def test_start_creates_hardened_container_on_workspace_storage(monkeypatch, tmp_
 
     assert result["state"] == "running"
     assert result["container_id"] == "container-123"
+    assert result["storage_ref"].startswith("xfs-")
     assert len(fake.containers.created) == 1
 
     container = fake.containers.created[0][1]
