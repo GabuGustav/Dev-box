@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = "sqlite:///./devbox.db"
     api_v1_prefix: str = "/api/v1"
+    executor_service_url: str = "http://worker:9000"
+    executor_service_token: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
