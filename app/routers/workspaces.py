@@ -251,6 +251,8 @@ def list_snapshots(
     principal: Principal = Depends(get_current_principal),
 ) -> list[SnapshotRead]:
     workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Workspace is deleted.")
     result = execute_lifecycle("list_snapshots", workspace.id)
     return [SnapshotRead.model_validate(item) for item in result["items"]]
 
