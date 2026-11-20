@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -31,6 +32,7 @@ SNAPSHOT_INODE_LIMIT = int(os.getenv("DEVBOX_SNAPSHOT_INODE_LIMIT", "50000"))
 SNAPSHOT_ENCRYPTION_KEY = os.getenv("DEVBOX_SNAPSHOT_ENCRYPTION_KEY", "")
 SNAPSHOT_MAX_COUNT = int(os.getenv("DEVBOX_SNAPSHOT_MAX_COUNT", "10"))
 SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3)))
+RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))
 workspace_storage = XFSWorkspaceStorage(
     WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA, WORKSPACE_INODE_LIMIT
 )
@@ -75,6 +77,80 @@ def ensure_image() -> None:
         docker_client.images.build(path=WORKSPACE_IMAGE_CONTEXT, tag=IMAGE_NAME, rm=True)
 
 
+def _stop_unsafe_container(container, reason: str) -> None:
+    try:
+        container.reload()
+        if container.status == "paused":
+            container.unpause()
+            container.reload()
+        if container.status in {"running", "restarting"}:
+            container.stop(timeout=10)
+        logger.error(
+            "Stopped workspace container after storage validation failed",
+            extra={
+                "container_id": container.id,
+                "container_name": container.name,
+                "reason": reason,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to stop an unsafe workspace container",
+            extra={"container_id": getattr(container, "id", None), "reason": reason},
+        )
+
+
+def reconcile_managed_containers() -> int:
+    """Stop managed containers whose workspace mount no longer matches its XFS directory."""
+    stopped = 0
+    try:
+        containers = docker_client.containers.list(
+            all=True, filters={"label": "devbox.managed=true"}
+        )
+    except APIError:
+        logger.exception("Unable to enumerate managed workspace containers")
+        return stopped
+
+    for container in containers:
+        try:
+            container.reload()
+            labels = container.attrs.get("Config", {}).get("Labels") or {}
+            workspace_id = labels.get("devbox.workspace_id")
+            if labels.get("devbox.managed") != "true" or not workspace_id:
+                _stop_unsafe_container(container, "managed workspace labels are missing")
+                stopped += 1
+                continue
+            expected_name, _ = names_for(workspace_id)
+            if container.name != expected_name:
+                _stop_unsafe_container(container, "container name does not match workspace ID")
+                stopped += 1
+                continue
+            workspace_path = workspace_storage.ensure_workspace(workspace_id)
+            mounts = container.attrs.get("Mounts", [])
+            workspace_mount = next(
+                (mount for mount in mounts if mount.get("Destination") == "/workspace"),
+                None,
+            )
+            if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+                _stop_unsafe_container(container, "workspace bind mount does not match XFS storage")
+                stopped += 1
+        except Exception as exc:
+            _stop_unsafe_container(container, f"workspace storage validation failed: {exc}")
+            stopped += 1
+    if stopped:
+        logger.warning("Workspace reconciliation stopped unsafe containers", extra={"count": stopped})
+    return stopped
+
+
+async def reconciliation_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(reconcile_managed_containers)
+        except Exception:
+            logger.exception("Workspace reconciliation loop failed")
+        await asyncio.sleep(max(5, RECONCILE_INTERVAL_SECONDS))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if not SERVICE_TOKEN:
@@ -82,7 +158,12 @@ async def lifespan(_: FastAPI):
             "DEVBOX_EXECUTOR_TOKEN is not configured; internal calls will be rejected."
         )
     ensure_image()
-    yield
+    reconciler = asyncio.create_task(reconciliation_loop())
+    try:
+        yield
+    finally:
+        reconciler.cancel()
+        await asyncio.gather(reconciler, return_exceptions=True)
 
 
 app = FastAPI(title="DevBox Executor", version="0.1.0", lifespan=lifespan)
