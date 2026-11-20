@@ -20,6 +20,7 @@ class FakeContainer:
         self.status = "created"
         self.create_kwargs = None
         self.started = False
+        self.attrs = {"Mounts": []}
 
     def reload(self):
         return None
@@ -35,8 +36,11 @@ class FakeContainer:
 class FakeVolumes:
     def __init__(self):
         self.created = []
+        self.existing = None
 
     def get(self, name):
+        if self.existing is not None:
+            return self.existing
         raise MissingResource(name)
 
     def create(self, **kwargs):
@@ -137,3 +141,25 @@ def test_internal_service_requires_configured_token(monkeypatch):
     assert error.value.status_code == 401
 
     assert executor.require_service_token("Bearer test-secret") is None
+
+
+def test_resume_reapplies_quota_and_validates_xfs_mount(monkeypatch, tmp_path):
+    fake = FakeDockerClient()
+    monkeypatch.setattr(executor, "docker_client", fake)
+    monkeypatch.setattr(executor, "NotFound", MissingResource)
+    storage_path = tmp_path / "workspace"
+    storage_path.mkdir()
+    storage = FakeStorage(storage_path)
+    monkeypatch.setattr(executor, "workspace_storage", storage)
+    existing = FakeContainer()
+    existing.status = "exited"
+    existing.attrs = {
+        "Mounts": [{"Destination": "/workspace", "Source": str(storage_path)}]
+    }
+    fake.containers.existing = existing
+
+    result = executor.resume_workspace("dbx_abcdefghijklmnopqrstuv")
+
+    assert result["state"] == "running"
+    assert result["storage_ref"].startswith("xfs-")
+    assert existing.started is True
