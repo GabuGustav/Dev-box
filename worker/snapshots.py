@@ -95,6 +95,7 @@ class SnapshotStore:
     def __init__(
         self,
         storage: XFSWorkspaceStorage,
+        workspace_storage: XFSWorkspaceStorage,
         encryption_key: str,
         *,
         max_snapshots: int = 10,
@@ -116,6 +117,7 @@ class SnapshotStore:
         if max_snapshots < 1 or max_snapshot_bytes < 1 or max_entries < 1:
             raise SnapshotError("Snapshot limits must be positive.")
         self.storage = storage
+        self.workspace_storage = workspace_storage
         self.key = key
         self.max_snapshots = max_snapshots
         self.max_snapshot_bytes = max_snapshot_bytes
@@ -200,7 +202,6 @@ class SnapshotStore:
             algorithms.AES(self.key), modes.GCM(nonce)
         ).encryptor()
         encryptor.authenticate_additional_data(self._aad(workspace_id, snapshot_id))
-        digest = hashlib.sha256()
         plaintext_size = 0
         writer = None
         try:
@@ -369,11 +370,11 @@ class SnapshotStore:
             for name in directories + files:
                 path = Path(root) / name
                 if not path.is_symlink():
-                    self.storage.owner_setter(path, 10001, 10001)
-            self.storage.owner_setter(Path(root), 10001, 10001)
+                    self.workspace_storage.owner_setter(path, 10001, 10001)
+            self.workspace_storage.owner_setter(Path(root), 10001, 10001)
 
     def recover_restore(self, workspace_id: str) -> None:
-        _, workspace_directory = self.storage._workspace_path(workspace_id)
+        _, workspace_directory = self.workspace_storage._workspace_path(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
         backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
         for path in (stage, backup):
@@ -388,6 +389,9 @@ class SnapshotStore:
             shutil.rmtree(stage)
 
     def restore(self, workspace_id: str, snapshot_id: str, workspace_path: Path) -> dict:
+        _, expected_workspace_path = self.workspace_storage._workspace_path(workspace_id)
+        if workspace_path != expected_workspace_path:
+            raise SnapshotError("Restore target does not match the assigned workspace directory.")
         encrypted_path, expected_hash = self._snapshot_record(workspace_id, snapshot_id)
         digest = hashlib.sha256()
         with encrypted_path.open("rb") as source:
@@ -397,12 +401,12 @@ class SnapshotStore:
             raise SnapshotError("Snapshot checksum verification failed.")
 
         self.recover_restore(workspace_id)
-        _, workspace_directory = self.storage._workspace_path(workspace_id)
-        project_id = self.storage._project_id(workspace_id)
+        _, workspace_directory = self.workspace_storage._workspace_path(workspace_id)
+        project_id = self.workspace_storage._project_id(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
         backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
         try:
-            self.storage.prepare_project_directory(workspace_id, stage, project_id)
+            self.workspace_storage.prepare_project_directory(workspace_id, stage, project_id)
             self._extract(encrypted_path, workspace_id, snapshot_id, stage)
             if workspace_directory.exists():
                 os.replace(workspace_directory, backup)
