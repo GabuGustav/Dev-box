@@ -86,6 +86,19 @@ def start_workspace(workspace_id: str) -> dict:
     try:
         container = docker_client.containers.get(container_name)
         container.reload()
+        mounts = container.attrs.get("Mounts", [])
+        workspace_mount = next(
+            (mount for mount in mounts if mount.get("Destination") == "/workspace"),
+            None,
+        )
+        if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Existing workspace uses legacy or unexpected storage. "
+                    "Migrate its data before starting it with the XFS backend."
+                ),
+            )
     except NotFound:
         container = docker_client.containers.create(
             image=IMAGE_NAME,
@@ -149,7 +162,7 @@ def stop_workspace(workspace_id: str) -> dict:
         return {
             "workspace_id": workspace_id,
             "container_id": None,
-            "volume_name": volume_name,
+            "storage_ref": volume_name,
             "state": "absent",
         }
 
