@@ -219,6 +219,11 @@ def test_replaced_workspace_directory_fails_closed(tmp_path):
 
     with pytest.raises(WorkspaceStorageError, match="identity changed"):
         storage.ensure_workspace(WORKSPACE_ID)
+    with pytest.raises(WorkspaceStorageError, match="identity changed"):
+        storage.delete_workspace(WORKSPACE_ID)
+
+    assert directory.is_dir()
+    assert replacement.is_dir()
 
 
 def test_registry_schema_upgrades_older_project_table(tmp_path):
