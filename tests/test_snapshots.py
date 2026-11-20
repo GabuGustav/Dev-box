@@ -159,3 +159,34 @@ def test_snapshot_creation_rejects_symlinks_that_escape_workspace(tmp_path):
 
     with pytest.raises(SnapshotError, match="symbolic link"):
         store.create(WORKSPACE_ID, workspace)
+
+
+
+def test_interrupted_restore_recovers_previous_workspace_tree(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    _, workspace = workspace_storage._workspace_path(WORKSPACE_ID)
+    backup = workspace.parent / f".{workspace.name}.restore-backup"
+    stage = workspace.parent / f".{workspace.name}.restore-stage"
+    backup.mkdir()
+    stage.mkdir()
+    (backup / "previous.txt").write_text("safe", encoding="utf-8")
+
+    store.recover_restore(WORKSPACE_ID)
+
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "safe"
+    assert not backup.exists()
+    assert not stage.exists()
+
+
+def test_interrupted_restore_discards_backup_after_new_tree_is_live(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    _, workspace = workspace_storage._workspace_path(WORKSPACE_ID)
+    workspace.mkdir()
+    backup = workspace.parent / f".{workspace.name}.restore-backup"
+    backup.mkdir()
+    (backup / "old.txt").write_text("old", encoding="utf-8")
+
+    store.recover_restore(WORKSPACE_ID)
+
+    assert workspace.is_dir()
+    assert not backup.exists()
