@@ -9,6 +9,8 @@ import docker
 from docker.errors import APIError, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
+from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
+
 logger = logging.getLogger("devbox.executor")
 WORKSPACE_ID_PATTERN = re.compile(r"^dbx_[A-Za-z0-9_-]{20,40}$")
 IMAGE_NAME = os.getenv("DEVBOX_WORKSPACE_IMAGE", "devbox-workspace:0.1")
@@ -19,6 +21,9 @@ SERVICE_TOKEN = os.getenv("DEVBOX_EXECUTOR_TOKEN", "")
 WORKSPACE_IMAGE_CONTEXT = os.getenv(
     "DEVBOX_WORKSPACE_IMAGE_CONTEXT", "/opt/devbox/workspace-image"
 )
+WORKSPACE_STORAGE_ROOT = os.getenv("DEVBOX_WORKSPACE_STORAGE_ROOT", "/srv/devbox/workspaces")
+WORKSPACE_DISK_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
+workspace_storage = XFSWorkspaceStorage(WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA)
 docker_client = docker.from_env()
 
 
@@ -73,14 +78,11 @@ def health() -> dict[str, str]:
     dependencies=[Depends(require_service_token)],
 )
 def start_workspace(workspace_id: str) -> dict:
-    container_name, volume_name = names_for(workspace_id)
+    container_name, storage_name = names_for(workspace_id)
     try:
-        volume = docker_client.volumes.get(volume_name)
-    except NotFound:
-        volume = docker_client.volumes.create(
-            name=volume_name,
-            labels={"devbox.managed": "true"},
-        )
+        workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    except WorkspaceStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         container = docker_client.containers.get(container_name)
         container.reload()
@@ -94,7 +96,7 @@ def start_workspace(workspace_id: str) -> dict:
             working_dir="/workspace",
             environment={"HOME": "/workspace/.home", "TMPDIR": "/tmp"},
             network_mode="none",
-            volumes={volume.name: {"bind": "/workspace", "mode": "rw"}},
+            volumes={str(workspace_path): {"bind": "/workspace", "mode": "rw"}},
             mem_limit=WORKSPACE_MEMORY,
             nano_cpus=int(WORKSPACE_CPU * 1_000_000_000),
             pids_limit=WORKSPACE_PIDS,
@@ -117,7 +119,7 @@ def start_workspace(workspace_id: str) -> dict:
     return {
         "workspace_id": workspace_id,
         "container_id": container.id,
-        "volume_name": volume.name,
+        "volume_name": storage_name,
         "state": container.status,
     }
 
@@ -216,10 +218,9 @@ def delete_workspace(workspace_id: str) -> dict:
     except NotFound:
         pass
     try:
-        volume = docker_client.volumes.get(volume_name)
-        volume.remove(force=True)
-    except NotFound:
-        pass
+        workspace_storage.delete_workspace(workspace_id)
+    except WorkspaceStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
         "workspace_id": workspace_id,
         "container_id": None,
