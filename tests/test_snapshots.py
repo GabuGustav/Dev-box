@@ -218,7 +218,6 @@ def test_invalid_encryption_key_does_not_block_snapshot_deletion(tmp_path):
     assert store.list(WORKSPACE_ID) == []
 
 
-
 def test_orphaned_snapshot_and_partial_archive_files_are_reconciled(tmp_path):
     store, workspace_storage = make_store(tmp_path)
     workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
