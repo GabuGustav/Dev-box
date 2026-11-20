@@ -145,8 +145,8 @@ class XFSWorkspaceStorage:
             connection.close()
 
     def ensure_workspace(self, workspace_id: str) -> Path:
-        self.validate_backend()
         _, directory = self._workspace_path(workspace_id)
+        self.validate_backend()
         if not self.registry.exists() and any(self.root.iterdir()):
             raise WorkspaceStorageError(
                 "Workspace registry is missing while storage data exists; recover the registry before provisioning."
@@ -172,8 +172,8 @@ class XFSWorkspaceStorage:
         return directory
 
     def delete_workspace(self, workspace_id: str) -> None:
-        self.validate_backend()
         _, directory = self._workspace_path(workspace_id)
+        self.validate_backend()
         if not self.registry.exists():
             if directory.exists() or any(self.root.iterdir()):
                 raise WorkspaceStorageError(
@@ -202,7 +202,7 @@ class XFSWorkspaceStorage:
                 "xfs_quota",
                 "-x",
                 "-c",
-                f"limit -p bhard=0 {project_id}",
+                f"limit -p bhard=0 ihard=0 {project_id}",
                 str(self.root),
             )
         if directory.is_symlink():
