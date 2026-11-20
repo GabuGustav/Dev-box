@@ -160,8 +160,8 @@ def test_missing_key_blocks_create_and_restore_but_allows_deletion(tmp_path):
         store.create(WORKSPACE_ID, workspace)
 
     assert store.list(WORKSPACE_ID) == []
-    store.delete_workspace(WORKSPACE_ID)
-    assert not snapshot_storage._workspace_path(WORKSPACE_ID)[1].exists()
+    with pytest.raises(SnapshotError, match="key is not configured"):
+        store.restore(WORKSPACE_ID, "a" * 32, workspace)
     store.delete_workspace(WORKSPACE_ID)
     assert not snapshot_storage._workspace_path(WORKSPACE_ID)[1].exists()
 
@@ -216,6 +216,8 @@ def test_invalid_encryption_key_does_not_block_snapshot_deletion(tmp_path):
         store.create(WORKSPACE_ID, workspace_storage.ensure_workspace(WORKSPACE_ID))
 
     assert store.list(WORKSPACE_ID) == []
+    store.delete_workspace(WORKSPACE_ID)
+    assert not snapshot_storage._workspace_path(WORKSPACE_ID)[1].exists()
 
 
 def test_orphaned_snapshot_and_partial_archive_files_are_reconciled(tmp_path):
