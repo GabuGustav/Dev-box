@@ -106,7 +106,7 @@ This is container-level isolation, not a VM boundary. The worker supervisor is h
 
 **Storage requirements:** the worker refuses to provision a workspace unless the configured storage root is on XFS with project quota accounting and enforcement enabled. The worker uses `xfs_quota` to assign a unique project ID, a hard block limit, and a hard inode limit before mounting the directory into a workspace container. A SQLite registry prevents two workspaces from accidentally sharing a project ID. The workspace storage root must be mounted into the worker at the same absolute path used by the Docker daemon. Docker Desktop and non-XFS local filesystems are not supported for actual workspace provisioning; use them for API/unit-test development only.
 
-**Known Phase 2 gaps:** snapshot/restore, worker crash recovery, Docker-backed persistence tests, and adversarial cross-container filesystem tests are not complete. The current network isolation prevents repository cloning and dependency downloads; controlled egress will be designed with the Git integration phase. Do not treat this branch as production-hardened multi-tenant infrastructure.
+**Known Phase 2 gaps:** snapshot/restore, background worker reconciliation, quota-aware backup/restore drills, and adversarial host-escape tests are not complete. Opt-in XFS quota and Docker persistence/isolation integration tests are provided under `tests/integration`; they require a dedicated test filesystem and are not run by default. The current network isolation prevents repository cloning and dependency downloads; controlled egress will be designed with the Git integration phase. Do not treat this branch as production-hardened multi-tenant infrastructure.
 
 ## Development checks
 
@@ -116,7 +116,7 @@ ruff check .
 pytest
 ```
 
-The API tests mock the executor service, and executor unit tests mock Docker SDK resources; neither requires a running Docker daemon. Container-level integration tests must run on a Docker-enabled host.
+The API tests mock the executor service, and executor unit tests mock Docker SDK resources; neither requires a running Docker daemon. Kernel quota tests require `DEVBOX_TEST_XFS_ROOT` to point at an empty dedicated XFS test mount. Docker persistence tests additionally require `DEVBOX_RUN_DOCKER_INTEGRATION=1` and a Linux Docker host.
 
 ## Next
 
