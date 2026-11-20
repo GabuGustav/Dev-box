@@ -351,11 +351,11 @@ class SnapshotStore:
                         symlinks.append((destination, member.linkname))
                     else:
                         destination.parent.mkdir(parents=True, exist_ok=True)
-                        with archive.extractfile(member) as input_file:
-                            if input_file is None:
-                                raise SnapshotError("Snapshot file contents are unavailable.")
-                            with destination.open("xb") as output_file:
-                                shutil.copyfileobj(input_file, output_file, CHUNK_SIZE)
+                        input_file = archive.extractfile(member)
+                        if input_file is None:
+                            raise SnapshotError("Snapshot file contents are unavailable.")
+                        with input_file, destination.open("xb") as output_file:
+                            shutil.copyfileobj(input_file, output_file, CHUNK_SIZE)
                         destination.chmod(0o755 if member.mode & 0o111 else 0o644)
             reader.verify()
 
