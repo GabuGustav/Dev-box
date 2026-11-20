@@ -9,6 +9,7 @@ import docker
 from docker.errors import APIError, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
+from worker.snapshots import SnapshotError, SnapshotStore
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.executor")
@@ -24,10 +25,39 @@ WORKSPACE_IMAGE_CONTEXT = os.getenv(
 WORKSPACE_STORAGE_ROOT = os.getenv("DEVBOX_WORKSPACE_STORAGE_ROOT", "/srv/devbox/workspaces")
 WORKSPACE_DISK_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
 WORKSPACE_INODE_LIMIT = int(os.getenv("DEVBOX_WORKSPACE_INODE_LIMIT", "200000"))
+SNAPSHOT_STORAGE_ROOT = os.getenv("DEVBOX_SNAPSHOT_STORAGE_ROOT", "/srv/devbox/snapshots")
+SNAPSHOT_DISK_QUOTA = os.getenv("DEVBOX_SNAPSHOT_DISK_QUOTA", "20g")
+SNAPSHOT_INODE_LIMIT = int(os.getenv("DEVBOX_SNAPSHOT_INODE_LIMIT", "50000"))
+SNAPSHOT_ENCRYPTION_KEY = os.getenv("DEVBOX_SNAPSHOT_ENCRYPTION_KEY", "")
+SNAPSHOT_MAX_COUNT = int(os.getenv("DEVBOX_SNAPSHOT_MAX_COUNT", "10"))
+SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3)))
 workspace_storage = XFSWorkspaceStorage(
     WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA, WORKSPACE_INODE_LIMIT
 )
+snapshot_storage = XFSWorkspaceStorage(
+    SNAPSHOT_STORAGE_ROOT, SNAPSHOT_DISK_QUOTA, SNAPSHOT_INODE_LIMIT
+)
+snapshot_store = (
+    SnapshotStore(
+        snapshot_storage,
+        workspace_storage,
+        SNAPSHOT_ENCRYPTION_KEY,
+        max_snapshots=SNAPSHOT_MAX_COUNT,
+        max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
+    )
+    if SNAPSHOT_ENCRYPTION_KEY
+    else None
+)
 docker_client = docker.from_env()
+
+
+def require_snapshot_store() -> SnapshotStore:
+    if snapshot_store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Encrypted snapshots are unavailable; configure the snapshot encryption key.",
+        )
+    return snapshot_store
 
 
 def require_service_token(authorization: str | None = Header(default=None)) -> None:
@@ -83,6 +113,8 @@ def health() -> dict[str, str]:
 def start_workspace(workspace_id: str) -> dict:
     container_name, storage_name = names_for(workspace_id)
     try:
+        if snapshot_store is not None:
+            snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
     except WorkspaceStorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -202,6 +234,8 @@ def pause_workspace(workspace_id: str) -> dict:
 def resume_workspace(workspace_id: str) -> dict:
     container_name, storage_name = names_for(workspace_id)
     try:
+        if snapshot_store is not None:
+            snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
     except WorkspaceStorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -236,6 +270,115 @@ def resume_workspace(workspace_id: str) -> dict:
         ) from exc
 
 
+@app.post(
+    "/internal/workspaces/{workspace_id}/snapshots",
+    dependencies=[Depends(require_service_token)],
+)
+def create_snapshot(workspace_id: str) -> dict:
+    store = require_snapshot_store()
+    container_name, _ = names_for(workspace_id)
+    try:
+        workspace_path = workspace_storage.ensure_workspace(workspace_id)
+        was_running = False
+        try:
+            container = docker_client.containers.get(container_name)
+            container.reload()
+            mounts = container.attrs.get("Mounts", [])
+            workspace_mount = next(
+                (mount for mount in mounts if mount.get("Destination") == "/workspace"),
+                None,
+            )
+            if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Workspace container is not attached to its assigned storage.",
+                )
+            if container.status == "running":
+                container.pause()
+                was_running = True
+            elif container.status == "paused":
+                pass
+            elif container.status not in {"created", "exited"}:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Cannot snapshot a workspace in state {container.status}.",
+                )
+        except NotFound:
+            container = None
+        try:
+            snapshot = store.create(workspace_id, workspace_path)
+        finally:
+            if was_running and container is not None:
+                container.unpause()
+        return snapshot
+    except (WorkspaceStorageError, SnapshotError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get(
+    "/internal/workspaces/{workspace_id}/snapshots",
+    dependencies=[Depends(require_service_token)],
+)
+def list_snapshots(workspace_id: str) -> dict:
+    store = require_snapshot_store()
+    try:
+        return {"workspace_id": workspace_id, "items": store.list(workspace_id)}
+    except (WorkspaceStorageError, SnapshotError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/snapshots/{snapshot_id}/restore",
+    dependencies=[Depends(require_service_token)],
+)
+def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
+    store = require_snapshot_store()
+    container_name, _ = names_for(workspace_id)
+    try:
+        store.recover_restore(workspace_id)
+        workspace_path = workspace_storage.ensure_workspace(workspace_id)
+        try:
+            container = docker_client.containers.get(container_name)
+            container.reload()
+            if container.status in {"running", "paused"}:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Stop the workspace before restoring a snapshot.",
+                )
+            mounts = container.attrs.get("Mounts", [])
+            workspace_mount = next(
+                (mount for mount in mounts if mount.get("Destination") == "/workspace"),
+                None,
+            )
+            if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Workspace container is not attached to its assigned storage.",
+                )
+            container_id = container.id
+        except NotFound:
+            container_id = None
+        result = store.restore(workspace_id, snapshot_id, workspace_path)
+        result["container_id"] = container_id
+        result["storage_ref"] = names_for(workspace_id)[1]
+        return result
+    except (WorkspaceStorageError, SnapshotError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.delete(
+    "/internal/workspaces/{workspace_id}/snapshots/{snapshot_id}",
+    dependencies=[Depends(require_service_token)],
+)
+def delete_snapshot(workspace_id: str, snapshot_id: str) -> dict:
+    store = require_snapshot_store()
+    try:
+        store.delete(workspace_id, snapshot_id)
+        return {"workspace_id": workspace_id, "snapshot_id": snapshot_id, "state": "deleted"}
+    except (WorkspaceStorageError, SnapshotError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.delete(
     "/internal/workspaces/{workspace_id}",
     dependencies=[Depends(require_service_token)],
@@ -252,6 +395,8 @@ def delete_workspace(workspace_id: str) -> dict:
     except NotFound:
         pass
     try:
+        if snapshot_store is not None:
+            snapshot_store.delete_workspace(workspace_id)
         workspace_storage.delete_workspace(workspace_id)
     except WorkspaceStorageError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
