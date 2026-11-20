@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["main", "phase-1-core-platform"]
+    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "phase-1-core-platform"]
 
 jobs:
   quality:
