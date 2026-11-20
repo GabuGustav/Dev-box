@@ -185,9 +185,9 @@ class XFSWorkspaceStorage:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
         if not self.registry.exists():
-            if directory.exists() or any(self.root.iterdir()):
+            if directory.exists() or directory.is_symlink():
                 raise WorkspaceStorageError(
-                    "Workspace registry is missing while storage data exists; recover it before deletion."
+                    "Workspace registry is missing for this workspace; recover it before deletion."
                 )
             return
         if directory.is_symlink() or (
