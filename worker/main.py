@@ -116,7 +116,7 @@ def start_workspace(workspace_id: str) -> dict:
         if snapshot_store is not None:
             snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
-    except WorkspaceStorageError as exc:
+    except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         container = docker_client.containers.get(container_name)
@@ -237,7 +237,7 @@ def resume_workspace(workspace_id: str) -> dict:
         if snapshot_store is not None:
             snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
-    except WorkspaceStorageError as exc:
+    except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         container = docker_client.containers.get(container_name)
@@ -398,7 +398,7 @@ def delete_workspace(workspace_id: str) -> dict:
         if snapshot_store is not None:
             snapshot_store.delete_workspace(workspace_id)
         workspace_storage.delete_workspace(workspace_id)
-    except WorkspaceStorageError as exc:
+    except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
         "workspace_id": workspace_id,
