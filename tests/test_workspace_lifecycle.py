@@ -42,6 +42,41 @@ class FakeExecutor:
     def delete(self, workspace_id):
         return self._result("delete", workspace_id, "deleted")
 
+    def create_snapshot(self, workspace_id):
+        self.calls.append(("create_snapshot", workspace_id))
+        return {
+            "snapshot_id": "a" * 32,
+            "workspace_id": workspace_id,
+            "created_at": "2026-11-21T12:00:00+00:00",
+            "size_bytes": 4096,
+            "sha256": "b" * 64,
+        }
+
+    def list_snapshots(self, workspace_id):
+        self.calls.append(("list_snapshots", workspace_id))
+        return {
+            "items": [{
+                "snapshot_id": "a" * 32,
+                "workspace_id": workspace_id,
+                "created_at": "2026-11-21T12:00:00+00:00",
+                "size_bytes": 4096,
+                "sha256": "b" * 64,
+            }]
+        }
+
+    def restore_snapshot(self, workspace_id, snapshot_id):
+        result = self._result("restore_snapshot", workspace_id, "restored")
+        result["snapshot_id"] = snapshot_id
+        return result
+
+    def delete_snapshot(self, workspace_id, snapshot_id):
+        self.calls.append(("delete_snapshot", workspace_id))
+        return {
+            "workspace_id": workspace_id,
+            "snapshot_id": snapshot_id,
+            "state": "deleted",
+        }
+
 
 def test_workspace_lifecycle_transitions(client, monkeypatch):
     executor = FakeExecutor()
@@ -113,6 +148,59 @@ def test_other_principal_cannot_read_or_mutate_any_workspace_state(client, monke
         ("delete", f"/api/v1/workspaces/{workspace_id}"),
     ]
 
+    for method, path in requests:
+        response = getattr(client, method)(path, headers=headers)
+        assert response.status_code == 404
+
+    assert executor.calls == []
+
+
+
+def test_snapshot_routes_are_owner_scoped_and_update_workspace_state(client, monkeypatch):
+    executor = FakeExecutor()
+    monkeypatch.setattr(workspace_routes, "executor_client", executor)
+    workspace_id = create_workspace(client)
+
+    created = client.post(f"/api/v1/workspaces/{workspace_id}/snapshots")
+    assert created.status_code == 201
+    snapshot_id = created.json()["snapshot_id"]
+
+    listed = client.get(f"/api/v1/workspaces/{workspace_id}/snapshots")
+    assert listed.status_code == 200
+    assert listed.json()[0]["snapshot_id"] == snapshot_id
+
+    restored = client.post(
+        f"/api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}/restore"
+    )
+    assert restored.status_code == 200
+    assert restored.json()["status"] == "stopped"
+
+    deleted = client.delete(
+        f"/api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}"
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["state"] == "deleted"
+    assert [call[0] for call in executor.calls] == [
+        "create_snapshot",
+        "list_snapshots",
+        "restore_snapshot",
+        "delete_snapshot",
+    ]
+
+
+def test_other_principal_cannot_access_workspace_snapshots(client, monkeypatch):
+    executor = FakeExecutor()
+    monkeypatch.setattr(workspace_routes, "executor_client", executor)
+    workspace_id = create_workspace(client)
+    headers = auth_headers("test-key-two")
+    snapshot_id = "a" * 32
+
+    requests = [
+        ("get", f"/api/v1/workspaces/{workspace_id}/snapshots"),
+        ("post", f"/api/v1/workspaces/{workspace_id}/snapshots"),
+        ("post", f"/api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}/restore"),
+        ("delete", f"/api/v1/workspaces/{workspace_id}/snapshots/{snapshot_id}"),
+    ]
     for method, path in requests:
         response = getattr(client, method)(path, headers=headers)
         assert response.status_code == 404
