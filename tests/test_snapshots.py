@@ -189,3 +189,15 @@ def test_interrupted_restore_discards_backup_after_new_tree_is_live(tmp_path):
 
     assert workspace.is_dir()
     assert not backup.exists()
+
+
+
+def test_invalid_encryption_key_does_not_block_snapshot_deletion(tmp_path):
+    workspace_storage = make_storage(tmp_path / "workspace-data")
+    snapshot_storage = make_storage(tmp_path / "snapshot-data")
+    store = SnapshotStore(snapshot_storage, workspace_storage, "not-a-valid-key")
+
+    with pytest.raises(SnapshotError, match="32-byte URL-safe"):
+        store.create(WORKSPACE_ID, workspace_storage.ensure_workspace(WORKSPACE_ID))
+
+    assert store.list(WORKSPACE_ID) == []
