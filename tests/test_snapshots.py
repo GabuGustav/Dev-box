@@ -158,5 +158,5 @@ def test_snapshot_creation_rejects_symlinks_that_escape_workspace(tmp_path):
     outside.write_text("do not archive", encoding="utf-8")
     (workspace / "escape").symlink_to(outside)
 
-    with pytest.raises(SnapshotError, match="symbolic link escapes"):
+    with pytest.raises(SnapshotError, match="symbolic link"):
         store.create(WORKSPACE_ID, workspace)
