@@ -458,7 +458,10 @@ def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
     container_name, _ = names_for(workspace_id)
     try:
         store.recover_restore(workspace_id)
-        workspace_path = workspace_storage.ensure_workspace(workspace_id)
+        workspace_storage.validate_backend()
+        _, workspace_path = workspace_storage._workspace_path(workspace_id)
+        if workspace_path.exists() or workspace_path.is_symlink():
+            workspace_storage.ensure_workspace(workspace_id)
         try:
             container = docker_client.containers.get(container_name)
             container.reload()
