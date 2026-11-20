@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import sqlite3
@@ -32,6 +33,7 @@ class XFSWorkspaceStorage:
         inode_limit: int = 200_000,
         *,
         runner=subprocess.run,
+        owner_setter=os.chown,
     ) -> None:
         if not Path(root).is_absolute():
             raise WorkspaceStorageError("Workspace storage root must be an absolute path.")
@@ -45,6 +47,7 @@ class XFSWorkspaceStorage:
         self.quota_limit = quota_limit.lower()
         self.inode_limit = inode_limit
         self.runner = runner
+        self.owner_setter = owner_setter
         self.registry = self.root / ".devbox-storage.sqlite3"
 
     def _run(self, *args: str) -> str:
@@ -155,6 +158,13 @@ class XFSWorkspaceStorage:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink() or directory.resolve().parent != self.root.resolve():
             raise WorkspaceStorageError("Workspace storage directory escaped its root.")
+        try:
+            self.owner_setter(directory, 10001, 10001)
+            directory.chmod(0o700)
+        except OSError as exc:
+            raise WorkspaceStorageError(
+                "Unable to assign workspace directory ownership to the unprivileged runtime user."
+            ) from exc
         self._run(
             "xfs_quota",
             "-x",
