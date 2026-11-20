@@ -108,7 +108,7 @@ def _stop_unsafe_container(container, reason: str) -> None:
             container.unpause()
             container.reload()
         if container.status in {"running", "restarting"}:
-            container.stop(timeout=10)
+            container.stop(timeout=0)
         logger.error(
             "Stopped workspace container after storage validation failed",
             extra={
