@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import os
 import posixpath
 import re
@@ -105,12 +107,10 @@ class SnapshotStore:
     ) -> None:
         if not encryption_key:
             raise SnapshotError("Snapshot encryption is not configured.")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{43}", encryption_key):
+            raise SnapshotError("Snapshot encryption key must be a 32-byte URL-safe base64 value.")
         try:
-            import base64
-
-            key = base64.urlsafe_b64decode(
-                encryption_key + "=" * (-len(encryption_key) % 4)
-            )
+            key = base64.urlsafe_b64decode(encryption_key + "=")
         except (ValueError, TypeError) as exc:
             raise SnapshotError("Snapshot encryption key must be URL-safe base64.") from exc
         if len(key) != 32:
@@ -464,6 +464,4 @@ class SnapshotStore:
 
 
 def hmac_compare(left: str, right: str) -> bool:
-    import hmac
-
     return hmac.compare_digest(left, right)
