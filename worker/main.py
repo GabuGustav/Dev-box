@@ -256,6 +256,8 @@ def start_workspace(workspace_id: str) -> dict:
             working_dir="/workspace",
             environment={"HOME": "/workspace/.home", "TMPDIR": "/tmp"},
             network_mode="none",
+            pid_mode="private",
+            ipc_mode="private",
             volumes={str(workspace_path): {"bind": "/workspace", "mode": "rw"}},
             mem_limit=WORKSPACE_MEMORY,
             nano_cpus=int(WORKSPACE_CPU * 1_000_000_000),
