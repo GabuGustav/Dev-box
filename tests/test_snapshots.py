@@ -272,7 +272,6 @@ def test_missing_encrypted_file_is_detected_from_snapshot_metadata(tmp_path):
         store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
 
 
-
 def test_snapshot_size_limit_cleans_partial_encrypted_archive(tmp_path):
     workspace_storage = make_storage(tmp_path / "workspace-data")
     snapshot_storage = make_storage(tmp_path / "snapshot-data")
