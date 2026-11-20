@@ -119,7 +119,7 @@ def start_workspace(workspace_id: str) -> dict:
     return {
         "workspace_id": workspace_id,
         "container_id": container.id,
-        "volume_name": storage_name,
+        "storage_ref": storage_name,
         "state": container.status,
     }
 
@@ -142,7 +142,7 @@ def stop_workspace(workspace_id: str) -> dict:
         return {
             "workspace_id": workspace_id,
             "container_id": container.id,
-            "volume_name": volume_name,
+            "storage_ref": volume_name,
             "state": container.status,
         }
     except NotFound:
