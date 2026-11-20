@@ -15,14 +15,14 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 ## Phase 1 — Core platform skeleton
 
-- [ ] Create repository structure, backend application, configuration, and development environment.
-- [ ] Add database schema and migrations.
-- [ ] Add user and agent authentication.
-- [ ] Add workspace and repository metadata models.
-- [ ] Implement health checks, structured logging, and audit event foundation.
-- [ ] Add automated tests and CI.
+- [x] Create repository structure, backend application, configuration, and development environment.
+- [x] Add database schema and migrations.
+- [x] Add user and agent authentication (API-key principals).
+- [x] Add workspace and repository metadata models.
+- [x] Implement health checks, structured logging, and audit event foundation.
+- [x] Add automated tests and CI.
 
-**Exit criteria:** authenticated clients can create and list metadata-only workspaces.
+**Exit criteria:** authenticated clients can create and list metadata-only workspaces. Implemented on `phase-1-core-platform`; CI must pass before merge.
 
 ## Phase 2 — Isolated persistent workspaces
 
