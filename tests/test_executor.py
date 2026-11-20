@@ -67,8 +67,10 @@ class FakeStorage:
     def __init__(self, path):
         self.path = path
         self.deleted = []
+        self.ensured = []
 
     def ensure_workspace(self, workspace_id):
+        self.ensured.append(workspace_id)
         return self.path
 
     def delete_workspace(self, workspace_id):
@@ -163,3 +165,43 @@ def test_resume_reapplies_quota_and_validates_xfs_mount(monkeypatch, tmp_path):
     assert result["state"] == "running"
     assert result["storage_ref"].startswith("xfs-")
     assert existing.started is True
+
+
+def test_start_rejects_existing_container_with_legacy_mount(monkeypatch, tmp_path):
+    fake = FakeDockerClient()
+    monkeypatch.setattr(executor, "docker_client", fake)
+    monkeypatch.setattr(executor, "NotFound", MissingResource)
+    storage_path = tmp_path / "workspace"
+    storage_path.mkdir()
+    storage = FakeStorage(storage_path)
+    monkeypatch.setattr(executor, "workspace_storage", storage)
+    existing = FakeContainer()
+    existing.status = "exited"
+    fake.containers.existing = existing
+
+    with pytest.raises(HTTPException) as error:
+        executor.start_workspace("dbx_abcdefghijklmnopqrstuv")
+
+    assert error.value.status_code == 409
+    assert existing.started is False
+    assert storage.ensured == ["dbx_abcdefghijklmnopqrstuv"]
+
+
+def test_resume_rejects_existing_container_with_legacy_mount(monkeypatch, tmp_path):
+    fake = FakeDockerClient()
+    monkeypatch.setattr(executor, "docker_client", fake)
+    monkeypatch.setattr(executor, "NotFound", MissingResource)
+    storage_path = tmp_path / "workspace"
+    storage_path.mkdir()
+    storage = FakeStorage(storage_path)
+    monkeypatch.setattr(executor, "workspace_storage", storage)
+    existing = FakeContainer()
+    existing.status = "exited"
+    fake.containers.existing = existing
+
+    with pytest.raises(HTTPException) as error:
+        executor.resume_workspace("dbx_abcdefghijklmnopqrstuv")
+
+    assert error.value.status_code == 409
+    assert existing.started is False
+    assert storage.ensured == ["dbx_abcdefghijklmnopqrstuv"]
