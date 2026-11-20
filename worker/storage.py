@@ -112,7 +112,9 @@ class XFSWorkspaceStorage:
                 workspace_id TEXT PRIMARY KEY,
                 project_id INTEGER NOT NULL UNIQUE,
                 directory TEXT NOT NULL UNIQUE,
-                initialized INTEGER NOT NULL DEFAULT 0
+                initialized INTEGER NOT NULL DEFAULT 0,
+                device INTEGER,
+                inode INTEGER
             )"""
         )
         columns = {
@@ -123,15 +125,21 @@ class XFSWorkspaceStorage:
                 "ALTER TABLE workspace_projects "
                 "ADD COLUMN initialized INTEGER NOT NULL DEFAULT 0"
             )
+        if "device" not in columns:
+            connection.execute("ALTER TABLE workspace_projects ADD COLUMN device INTEGER")
+        if "inode" not in columns:
+            connection.execute("ALTER TABLE workspace_projects ADD COLUMN inode INTEGER")
         return connection
 
-    def _register_project(self, workspace_id: str, directory: Path) -> tuple[int, bool]:
+    def _register_project(
+        self, workspace_id: str, directory: Path
+    ) -> tuple[int, bool, int | None, int | None]:
         project_id = self._project_id(workspace_id)
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT project_id, directory, initialized "
+                "SELECT project_id, directory, initialized, device, inode "
                 "FROM workspace_projects WHERE workspace_id = ?",
                 (workspace_id,),
             ).fetchone()
@@ -139,7 +147,12 @@ class XFSWorkspaceStorage:
                 if existing[1] != str(directory):
                     raise WorkspaceStorageError("Workspace storage registry path mismatch.")
                 connection.commit()
-                return int(existing[0]), bool(existing[2])
+                return (
+                    int(existing[0]),
+                    bool(existing[2]),
+                    existing[3],
+                    existing[4],
+                )
             collision = connection.execute(
                 "SELECT workspace_id FROM workspace_projects WHERE project_id = ?",
                 (project_id,),
@@ -154,22 +167,37 @@ class XFSWorkspaceStorage:
                 (workspace_id, project_id, str(directory)),
             )
             connection.commit()
-            return project_id, False
+            return project_id, False, None, None
         except Exception:
             connection.rollback()
             raise
         finally:
             connection.close()
 
-    def _set_initialized(self, workspace_id: str, initialized: bool) -> None:
+    def _set_initialized(self, workspace_id: str, directory: Path) -> None:
+        stat = directory.stat(follow_symlinks=False)
         connection = self._connect()
         try:
-            connection.execute(
-                "UPDATE workspace_projects SET initialized = ? WHERE workspace_id = ?",
-                (int(initialized), workspace_id),
+            cursor = connection.execute(
+                "UPDATE workspace_projects "
+                "SET initialized = 1, device = ?, inode = ? WHERE workspace_id = ?",
+                (stat.st_dev, stat.st_ino, workspace_id),
             )
+            if cursor.rowcount != 1:
+                raise WorkspaceStorageError("Workspace project registry entry is missing.")
         finally:
             connection.close()
+
+    def mark_workspace_initialized(self, workspace_id: str, directory: Path) -> None:
+        _, expected_directory = self._workspace_path(workspace_id)
+        if (
+            directory != expected_directory
+            or directory.is_symlink()
+            or not directory.is_dir()
+            or directory.resolve().parent != self.root.resolve()
+        ):
+            raise WorkspaceStorageError("Workspace directory cannot be registered safely.")
+        self._set_initialized(workspace_id, directory)
 
     def ensure_workspace(self, workspace_id: str) -> Path:
         _, directory = self._workspace_path(workspace_id)
@@ -185,14 +213,30 @@ class XFSWorkspaceStorage:
                     "Workspace registry is missing while storage data exists; "
                     "recover the registry before provisioning."
                 )
-        project_id, initialized = self._register_project(workspace_id, directory)
+        project_id, initialized, registered_device, registered_inode = self._register_project(
+            workspace_id, directory
+        )
+        if directory.is_symlink():
+            raise WorkspaceStorageError("Workspace storage directory is an unexpected symlink.")
         directory_existed = directory.exists()
         if initialized and not directory_existed:
-            self._set_initialized(workspace_id, False)
-            initialized = False
+            raise WorkspaceStorageError(
+                "Registered workspace directory is missing; restore it from a snapshot."
+            )
+        if directory_existed and not directory.is_dir():
+            raise WorkspaceStorageError("Workspace storage path is not a directory.")
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink() or directory.resolve().parent != self.root.resolve():
             raise WorkspaceStorageError("Workspace storage directory escaped its root.")
+        directory_stat = directory.stat(follow_symlinks=False)
+        if initialized and registered_device is not None and registered_inode is not None:
+            if (directory_stat.st_dev, directory_stat.st_ino) != (
+                registered_device,
+                registered_inode,
+            ):
+                raise WorkspaceStorageError(
+                    "Workspace directory identity changed; refusing to attach replaced data."
+                )
         try:
             self.owner_setter(directory, 10001, 10001)
             directory.chmod(0o700)
@@ -208,7 +252,9 @@ class XFSWorkspaceStorage:
                 f"project -s -p {directory} {project_id}",
                 str(self.root),
             )
-            self._set_initialized(workspace_id, True)
+            self._set_initialized(workspace_id, directory)
+        elif registered_device is None or registered_inode is None:
+            self._set_initialized(workspace_id, directory)
         self._run(
             "xfs_quota",
             "-x",
@@ -254,6 +300,22 @@ class XFSWorkspaceStorage:
             raise WorkspaceStorageError("Staging directory already exists or is unsafe.")
         if project_id != self._project_id(workspace_id):
             raise WorkspaceStorageError("Staging project ID does not match the workspace.")
+        if not self.registry.exists():
+            unexpected_entries = [
+                entry
+                for entry in self.root.iterdir()
+                if entry.name != "lost+found" or entry.is_symlink() or not entry.is_dir()
+            ]
+            if unexpected_entries:
+                raise WorkspaceStorageError(
+                    "Workspace registry is missing while storage data exists; "
+                    "recover the registry before restoring."
+                )
+        registered_project_id, _, _, _ = self._register_project(
+            workspace_id, workspace_directory
+        )
+        if registered_project_id != project_id:
+            raise WorkspaceStorageError("Restore project ID does not match the registry.")
         directory.mkdir(mode=0o700)
         try:
             self.owner_setter(directory, 10001, 10001)
