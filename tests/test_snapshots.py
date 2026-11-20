@@ -136,7 +136,6 @@ def test_snapshot_ids_are_scoped_to_the_workspace(tmp_path):
         store._snapshot_record("dbx_zyxwvutsrqponmlkjihgfe", snapshot["snapshot_id"])
 
 
-
 def test_missing_key_blocks_create_and_restore_but_allows_deletion(tmp_path):
     workspace_storage = make_storage(tmp_path / "workspace-data")
     snapshot_storage = make_storage(tmp_path / "snapshot-data")
