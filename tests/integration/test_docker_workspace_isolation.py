@@ -86,3 +86,63 @@ def test_workspace_mount_is_private_and_survives_container_replacement():
                 storage.delete_workspace(workspace_id)
         finally:
             client.close()
+
+
+
+def test_workspace_containers_have_private_process_namespaces():
+    client = docker.from_env()
+    try:
+        client.ping()
+    except docker.errors.DockerException as exc:
+        pytest.skip(f"Docker daemon unavailable: {exc}")
+
+    storage = XFSWorkspaceStorage(XFS_TEST_ROOT, "128m", inode_limit=5000)
+    first_id = new_workspace_id()
+    second_id = new_workspace_id()
+    first_path = None
+    second_path = None
+    process_container = None
+    try:
+        first_path = storage.ensure_workspace(first_id)
+        second_path = storage.ensure_workspace(second_id)
+        process_container = client.containers.run(
+            IMAGE,
+            command=[
+                "python",
+                "-c",
+                "import time; time.sleep(120)",
+                "DEVBOX_AGENT_B_PROCESS_MARKER",
+            ],
+            volumes={str(second_path): {"bind": "/workspace", "mode": "rw"}},
+            working_dir="/workspace",
+            user="10001:10001",
+            network_mode="none",
+            read_only=True,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            detach=True,
+            remove=True,
+        )
+        output = run_workspace(
+            client,
+            IMAGE,
+            first_path,
+            "from pathlib import Path; "
+            "marker='DEVBOX_'+'AGENT_B_'+'PROCESS_MARKER'; "
+            "visible=any(marker.encode() in p.read_bytes() "
+            "for p in Path('/proc').glob('[0-9]*/cmdline')); "
+            "assert not visible",
+        )
+        assert output == b""
+    finally:
+        if process_container is not None:
+            try:
+                process_container.stop(timeout=2)
+            except docker.errors.DockerException:
+                pass
+        for workspace_id in (first_id, second_id):
+            try:
+                storage.delete_workspace(workspace_id)
+            except Exception:
+                pass
+        client.close()
