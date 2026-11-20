@@ -94,7 +94,7 @@ The snapshot registry and encrypted files must be backed up together. Keep the e
 - The inode quota limits file and directory count, reducing small-file exhaustion.
 - /tmp and /run are separate bounded tmpfs mounts (64 MiB and 16 MiB respectively); they are not part of the workspace's XFS block quota.
 - Container CPU, memory, PID, and network restrictions remain independent controls.
-- Snapshot create/list/restore/delete are implemented with encrypted, quota-limited storage. Backup/restore drills and real-host integration verification are still pending. Opt-in XFS quota and Docker persistence/isolation tests exist but have not yet been verified on a dedicated Linux host.
+- Snapshot create/list/restore/delete and periodic unsafe-mount reconciliation are implemented. Backup/restore drills and real-host integration verification are still pending. Opt-in XFS quota and Docker persistence/isolation tests exist but have not yet been verified on a dedicated Linux host.
 - This backend is not supported on Docker Desktop's ordinary VM filesystem. Use Docker Desktop for API development and mocked tests; use a Linux XFS host to validate actual workspace provisioning.
 
 ## Operational cautions
@@ -106,9 +106,9 @@ Do not call this container-level isolation a VM boundary. For hostile multi-tena
 
 ## Recovery and integration verification
 
-The worker service is configured to restart unless explicitly stopped. Workspace containers are independently managed by Docker and use a deterministic name plus a restart policy. After a worker restart, an API start/resume request finds the existing container, verifies that its /workspace bind mount still points at the expected XFS directory, and reuses it. A container with a legacy or unexpected mount is rejected without deleting its old data.
+The worker service is configured to restart unless explicitly stopped. Workspace containers are independently managed by Docker and use a deterministic name plus a restart policy. A periodic worker reconciliation loop (60 seconds by default) scans managed containers, verifies their labels, deterministic names, assigned XFS directory, and /workspace bind mount, and stops running containers whose storage no longer matches. It also recovers interrupted snapshot directory swaps before validating mounts. It never auto-starts or deletes containers.
 
-This is request-driven recovery, not a background reconciliation controller. The database status can be stale after an abrupt host or daemon failure until the next lifecycle request. Snapshot restore staging and backup directories are reconciled on the next start/resume request.
+The reconciliation loop does not access the API database, so database lifecycle status can remain stale after an abrupt host or daemon failure until the next API lifecycle request. Reconciliation is a safety controller, not a complete control-plane state synchronizer.
 
 Optional integration tests:
 
