@@ -36,11 +36,8 @@ class FakeContainer:
 class FakeVolumes:
     def __init__(self):
         self.created = []
-        self.existing = None
 
     def get(self, name):
-        if self.existing is not None:
-            return self.existing
         raise MissingResource(name)
 
     def create(self, **kwargs):
@@ -52,8 +49,11 @@ class FakeVolumes:
 class FakeContainers:
     def __init__(self):
         self.created = []
+        self.existing = None
 
     def get(self, name):
+        if self.existing is not None:
+            return self.existing
         raise MissingResource(name)
 
     def create(self, **kwargs):
