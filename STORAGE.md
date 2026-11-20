@@ -52,7 +52,7 @@ For each workspace:
 3. Allocate a deterministic 31-bit XFS project ID. A persistent SQLite registry enforces uniqueness and maps the workspace ID, project ID, and directory.
 4. Initialize the XFS project tree with the xfs_quota project -s operation.
 5. Apply bhard and ihard limits before the directory is mounted into the workspace container.
-6. Bind-mount only that directory at /workspace.
+6. Set the directory owner to UID/GID 10001, then bind-mount only that directory at /workspace.
 
 The registry is stored on the dedicated storage filesystem, outside individual workspace directories. It is required state: if it is missing while other storage data exists, provisioning fails closed. Back up the registry together with the workspace filesystem. Do not manually delete or edit it.
 
