@@ -165,7 +165,8 @@ def test_snapshot_creation_rejects_symlinks_that_escape_workspace(tmp_path):
 
 def test_interrupted_restore_recovers_previous_workspace_tree(tmp_path):
     store, workspace_storage = make_store(tmp_path)
-    _, workspace = workspace_storage._workspace_path(WORKSPACE_ID)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    workspace.rmdir()
     backup = workspace.parent / f".{workspace.name}.restore-backup"
     stage = workspace.parent / f".{workspace.name}.restore-stage"
     backup.mkdir()
@@ -181,8 +182,7 @@ def test_interrupted_restore_recovers_previous_workspace_tree(tmp_path):
 
 def test_interrupted_restore_discards_backup_after_new_tree_is_live(tmp_path):
     store, workspace_storage = make_store(tmp_path)
-    _, workspace = workspace_storage._workspace_path(WORKSPACE_ID)
-    workspace.mkdir()
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
     backup = workspace.parent / f".{workspace.name}.restore-backup"
     backup.mkdir()
     (backup / "old.txt").write_text("old", encoding="utf-8")
