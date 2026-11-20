@@ -434,7 +434,10 @@ class SnapshotStore:
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
         backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
         try:
-            self.workspace_storage.prepare_project_directory(workspace_id, stage, project_id)
+            self.workspace_storage.set_project_quota(workspace_id, multiplier=3)
+            self.workspace_storage.prepare_project_directory(
+                workspace_id, stage, project_id, quota_multiplier=3
+            )
             self._extract(encrypted_path, workspace_id, snapshot_id, stage)
             if workspace_directory.exists():
                 os.replace(workspace_directory, backup)
@@ -447,8 +450,9 @@ class SnapshotStore:
                     os.replace(backup, workspace_directory)
                 raise
             if backup.exists():
-                shutil.rmtree(backup, ignore_errors=True)
+                shutil.rmtree(backup)
                 self._fsync_directory(workspace_directory.parent)
+            self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
             return {
                 "snapshot_id": snapshot_id,
                 "workspace_id": workspace_id,
@@ -459,9 +463,14 @@ class SnapshotStore:
                 shutil.rmtree(stage, ignore_errors=True)
             if backup.exists() and not workspace_directory.exists():
                 os.replace(backup, workspace_directory)
+                self._fsync_directory(workspace_directory.parent)
+            if not backup.exists():
+                self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
             if isinstance(exc, SnapshotError):
                 raise
-            raise SnapshotError("Snapshot restore failed; the previous workspace was retained.") from exc
+            raise SnapshotError(
+                "Snapshot restore failed; the previous workspace was retained."
+            ) from exc
 
     def delete(self, workspace_id: str, snapshot_id: str) -> None:
         path, _ = self._snapshot_record(workspace_id, snapshot_id)
