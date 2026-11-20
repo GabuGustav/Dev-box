@@ -112,7 +112,7 @@ ruff check .
 pytest
 ```
 
-The API tests mock the executor service; they do not require a running Docker daemon. Container-level integration tests must run on a Docker-enabled host.
+The API tests mock the executor service, and executor unit tests mock Docker SDK resources; neither requires a running Docker daemon. Container-level integration tests must run on a Docker-enabled host.
 
 ## Next
 
