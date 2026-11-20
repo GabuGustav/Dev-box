@@ -97,6 +97,7 @@ def test_deleted_workspace_cannot_restart(client, monkeypatch):
     assert response.status_code == 409
     assert [call[0] for call in executor.calls] == ["delete"]
 
+
 def test_other_principal_cannot_read_or_mutate_any_workspace_state(client, monkeypatch):
     executor = FakeExecutor()
     monkeypatch.setattr(workspace_routes, "executor_client", executor)
