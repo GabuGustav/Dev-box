@@ -187,6 +187,7 @@ def test_start_rejects_existing_container_with_legacy_mount(monkeypatch, tmp_pat
     storage_path.mkdir()
     storage = FakeStorage(storage_path)
     monkeypatch.setattr(executor, "workspace_storage", storage)
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
     existing = FakeContainer()
     existing.status = "exited"
     fake.containers.existing = existing
@@ -207,6 +208,7 @@ def test_resume_rejects_existing_container_with_legacy_mount(monkeypatch, tmp_pa
     storage_path.mkdir()
     storage = FakeStorage(storage_path)
     monkeypatch.setattr(executor, "workspace_storage", storage)
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
     existing = FakeContainer()
     existing.status = "exited"
     fake.containers.existing = existing
@@ -217,7 +219,6 @@ def test_resume_rejects_existing_container_with_legacy_mount(monkeypatch, tmp_pa
     assert error.value.status_code == 409
     assert existing.started is False
     assert storage.ensured == ["dbx_abcdefghijklmnopqrstuv"]
-
 
 
 class ReconcileContainer:
