@@ -10,7 +10,7 @@ import docker
 from docker.errors import APIError, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
-from worker.snapshots import SnapshotError, SnapshotStore
+from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.executor")
@@ -385,6 +385,8 @@ def create_snapshot(workspace_id: str) -> dict:
             if was_running and container is not None:
                 container.unpause()
         return snapshot
+    except SnapshotConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -436,6 +438,8 @@ def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
         result["container_id"] = container_id
         result["storage_ref"] = names_for(workspace_id)[1]
         return result
+    except SnapshotNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -449,8 +453,10 @@ def delete_snapshot(workspace_id: str, snapshot_id: str) -> dict:
     try:
         store.delete(workspace_id, snapshot_id)
         return {"workspace_id": workspace_id, "snapshot_id": snapshot_id, "state": "deleted"}
-    except (WorkspaceStorageError, SnapshotError) as exc:
+    except SnapshotNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (WorkspaceStorageError, SnapshotError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.delete(
