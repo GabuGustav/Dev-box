@@ -47,10 +47,9 @@ def test_workspace_mount_is_private_and_survives_container_replacement():
     storage = XFSWorkspaceStorage(XFS_TEST_ROOT, "128m", inode_limit=5000)
     first_id = new_workspace_id()
     second_id = new_workspace_id()
-    first_path = storage.ensure_workspace(first_id)
-    second_path = storage.ensure_workspace(second_id)
-
     try:
+        first_path = storage.ensure_workspace(first_id)
+        second_path = storage.ensure_workspace(second_id)
         (second_path / "private.txt").write_text("agent-b-secret", encoding="utf-8")
 
         output = run_workspace(
