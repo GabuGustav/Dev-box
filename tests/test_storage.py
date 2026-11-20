@@ -199,18 +199,26 @@ def test_xfs_project_tree_is_initialized_once_across_restarts(tmp_path):
     ) == 2
 
 
-def test_missing_workspace_directory_is_reinitialized(tmp_path):
+def test_missing_registered_workspace_fails_closed(tmp_path):
     runner = FakeRunner()
     storage = make_storage(tmp_path, runner)
     directory = storage.ensure_workspace(WORKSPACE_ID)
     directory.rmdir()
 
-    storage.ensure_workspace(WORKSPACE_ID)
+    with pytest.raises(WorkspaceStorageError, match="directory is missing"):
+        storage.ensure_workspace(WORKSPACE_ID)
 
-    commands = [call[0][3] for call in runner.calls if call[0][0] == "xfs_quota"]
-    assert commands.count(
-        f"project -s -p {directory} {storage._project_id(WORKSPACE_ID)}"
-    ) == 2
+
+def test_replaced_workspace_directory_fails_closed(tmp_path):
+    runner = FakeRunner()
+    storage = make_storage(tmp_path, runner)
+    directory = storage.ensure_workspace(WORKSPACE_ID)
+    replacement = directory.with_name(f"{directory.name}-replacement")
+    directory.rename(replacement)
+    directory.mkdir()
+
+    with pytest.raises(WorkspaceStorageError, match="identity changed"):
+        storage.ensure_workspace(WORKSPACE_ID)
 
 
 def test_registry_schema_upgrades_older_project_table(tmp_path):
@@ -233,7 +241,7 @@ def test_registry_schema_upgrades_older_project_table(tmp_path):
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(workspace_projects)")
         }
-        assert "initialized" in columns
+        assert {"initialized", "device", "inode"} <= columns
     finally:
         connection.close()
 
