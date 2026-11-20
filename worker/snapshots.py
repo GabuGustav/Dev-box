@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from worker.storage import XFSWorkspaceStorage, WorkspaceStorageError
+from worker.storage import XFSWorkspaceStorage
 
 MAGIC = b"DBXSNP1\0"
 NONCE_SIZE = 12
@@ -206,8 +206,6 @@ class SnapshotStore:
             algorithms.AES(self.key), modes.GCM(nonce)
         ).encryptor()
         encryptor.authenticate_additional_data(self._aad(workspace_id, snapshot_id))
-        plaintext_size = 0
-        writer = None
         try:
             with temporary_path.open("xb") as output:
                 output.write(MAGIC + nonce)
@@ -220,7 +218,6 @@ class SnapshotStore:
                         filter=self._archive_filter,
                     )
                 writer.flush()
-                plaintext_size = writer.bytes_written
                 output.write(encryptor.finalize())
                 output.write(encryptor.tag)
                 output.flush()
