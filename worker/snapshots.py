@@ -210,6 +210,7 @@ class SnapshotStore:
 
     def create(self, workspace_id: str, workspace_path: Path) -> dict:
         key = self._require_key()
+        self.recover_restore(workspace_id)
         _, expected_workspace_path = self.workspace_storage._workspace_path(workspace_id)
         if (
             workspace_path != expected_workspace_path
