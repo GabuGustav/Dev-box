@@ -156,6 +156,14 @@ class SnapshotStore:
             raise SnapshotError("Snapshot encryption key is not configured.")
         return self.key
 
+    @staticmethod
+    def _fsync_directory(directory: Path) -> None:
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
     def _aad(self, workspace_id: str, snapshot_id: str) -> bytes:
         return f"devbox:{workspace_id}:{snapshot_id}".encode("utf-8")
 
@@ -240,6 +248,7 @@ class SnapshotStore:
                 while chunk := source.read(CHUNK_SIZE):
                     encrypted_hash.update(chunk)
             os.replace(temporary_path, final_path)
+            self._fsync_directory(snapshot_directory)
             created_at = datetime.now(UTC).isoformat()
             connection = self._connect()
             try:
@@ -393,9 +402,11 @@ class SnapshotStore:
         _, workspace_directory = self.workspace_storage._workspace_path(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
         backup = workspace_directory.parent / f".{workspace_directory.name}.restore-backup"
+        if workspace_directory.is_symlink():
+            raise SnapshotError("Workspace restore target is an unexpected symbolic link.")
         for path in (stage, backup):
-            if path.is_symlink():
-                raise SnapshotError("Restore recovery path is an unexpected symbolic link.")
+            if path.is_symlink() or (path.exists() and not path.is_dir()):
+                raise SnapshotError("Restore recovery path is not a safe directory.")
         if backup.exists():
             if workspace_directory.exists():
                 shutil.rmtree(backup)
@@ -427,14 +438,17 @@ class SnapshotStore:
             self._extract(encrypted_path, workspace_id, snapshot_id, stage)
             if workspace_directory.exists():
                 os.replace(workspace_directory, backup)
+                self._fsync_directory(workspace_directory.parent)
             try:
                 os.replace(stage, workspace_directory)
+                self._fsync_directory(workspace_directory.parent)
             except Exception:
                 if backup.exists() and not workspace_directory.exists():
                     os.replace(backup, workspace_directory)
                 raise
             if backup.exists():
-                shutil.rmtree(backup)
+                shutil.rmtree(backup, ignore_errors=True)
+                self._fsync_directory(workspace_directory.parent)
             return {
                 "snapshot_id": snapshot_id,
                 "workspace_id": workspace_id,
