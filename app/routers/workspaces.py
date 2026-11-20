@@ -30,7 +30,7 @@ def serialize_workspace(row: Workspace) -> WorkspaceRead:
         status=row.status,
         owner_id=row.owner_id,
         executor_id=row.executor_id,
-        volume_name=row.volume_name,
+        storage_ref=row.storage_ref,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -69,7 +69,7 @@ def record_lifecycle(
 ) -> WorkspaceRead:
     workspace.status = new_status
     workspace.executor_id = result.get("container_id")
-    workspace.volume_name = result.get("volume_name")
+    workspace.storage_ref = result.get("storage_ref")
     db.add(
         AuditEvent(
             actor_id=principal.id,
