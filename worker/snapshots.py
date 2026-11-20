@@ -310,7 +310,7 @@ class SnapshotStore:
             connection.close()
         if row is None:
             raise SnapshotError("Snapshot not found.")
-        if not re.fullmatch(r"[0-9a-f]{32}\\.dbxsnap", row[0]):
+        if not re.fullmatch(r"[0-9a-f]{32}\.dbxsnap", row[0]):
             raise SnapshotError("Snapshot registry contains an unsafe filename.")
         path = directory / row[0]
         if path.parent != directory or path.is_symlink() or not path.is_file():
@@ -473,7 +473,7 @@ class SnapshotStore:
             connection.close()
         directory = self.storage._workspace_path(workspace_id)[1]
         for row in rows:
-            if not re.fullmatch(r"[0-9a-f]{32}\\.dbxsnap", row[0]):
+            if not re.fullmatch(r"[0-9a-f]{32}\.dbxsnap", row[0]):
                 raise SnapshotError("Snapshot registry contains an unsafe filename.")
             path = directory / row[0]
             if path.parent != directory or path.is_symlink():
