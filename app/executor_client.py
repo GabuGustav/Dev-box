@@ -42,3 +42,22 @@ class ExecutorClient:
 
     def delete(self, workspace_id: str) -> dict:
         return self._request("DELETE", f"/internal/workspaces/{workspace_id}")
+
+
+    def create_snapshot(self, workspace_id: str) -> dict:
+        return self._request("POST", f"/internal/workspaces/{workspace_id}/snapshots")
+
+    def list_snapshots(self, workspace_id: str) -> dict:
+        return self._request("GET", f"/internal/workspaces/{workspace_id}/snapshots")
+
+    def restore_snapshot(self, workspace_id: str, snapshot_id: str) -> dict:
+        return self._request(
+            "POST",
+            f"/internal/workspaces/{workspace_id}/snapshots/{snapshot_id}/restore",
+        )
+
+    def delete_snapshot(self, workspace_id: str, snapshot_id: str) -> dict:
+        return self._request(
+            "DELETE",
+            f"/internal/workspaces/{workspace_id}/snapshots/{snapshot_id}",
+        )
