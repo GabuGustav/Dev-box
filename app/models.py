@@ -61,7 +61,7 @@ class Workspace(Base):
     branch: Mapped[str] = mapped_column(String(255), default="main", nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="registered", nullable=False)
     executor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    volume_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    storage_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
