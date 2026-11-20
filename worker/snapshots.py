@@ -161,6 +161,39 @@ class SnapshotStore:
             directory.chmod(0o700)
         except OSError as exc:
             raise SnapshotError("Unable to secure the snapshot directory.") from exc
+
+        if not self.registry.exists() and any(
+            entry.name.endswith(".dbxsnap") or entry.name.endswith(".dbxsnap.tmp")
+            for entry in directory.iterdir()
+        ):
+            raise SnapshotError(
+                "Snapshot metadata registry is missing; recover it before modifying snapshots."
+            )
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT filename FROM snapshots WHERE workspace_id = ?", (workspace_id,)
+            ).fetchall()
+        finally:
+            connection.close()
+        known_files = {row[0] for row in rows}
+        for entry in directory.iterdir():
+            if entry.is_symlink():
+                raise SnapshotError("Snapshot directory contains an unexpected symbolic link.")
+            if re.fullmatch(r"\.[0-9a-f]{32}\.dbxsnap\.tmp", entry.name):
+                entry.unlink(missing_ok=True)
+            elif re.fullmatch(r"[0-9a-f]{32}\.dbxsnap", entry.name):
+                if entry.name not in known_files:
+                    entry.unlink(missing_ok=True)
+                elif not entry.is_file():
+                    raise SnapshotError("Registered snapshot path is not a regular file.")
+            else:
+                raise SnapshotError("Snapshot directory contains an unexpected entry.")
+        for filename in known_files:
+            if not re.fullmatch(r"[0-9a-f]{32}\.dbxsnap", filename):
+                raise SnapshotError("Snapshot registry contains an unsafe filename.")
+            if not (directory / filename).is_file():
+                raise SnapshotError("Snapshot registry references a missing encrypted file.")
         return directory
 
     def _require_key(self) -> bytes:
@@ -501,7 +534,6 @@ class SnapshotStore:
 
     def delete(self, workspace_id: str, snapshot_id: str) -> None:
         path, _ = self._snapshot_record(workspace_id, snapshot_id)
-        path.unlink(missing_ok=True)
         connection = self._connect()
         try:
             connection.execute(
@@ -511,6 +543,7 @@ class SnapshotStore:
             connection.commit()
         finally:
             connection.close()
+        path.unlink(missing_ok=True)
 
     def delete_workspace(self, workspace_id: str) -> None:
         self._workspace_directory(workspace_id)
@@ -528,13 +561,14 @@ class SnapshotStore:
             path = directory / row[0]
             if path.parent != directory or path.is_symlink():
                 raise SnapshotError("Snapshot registry path is unsafe.")
-            path.unlink(missing_ok=True)
         connection = self._connect()
         try:
             connection.execute("DELETE FROM snapshots WHERE workspace_id = ?", (workspace_id,))
             connection.commit()
         finally:
             connection.close()
+        for row in rows:
+            (directory / row[0]).unlink(missing_ok=True)
         self.storage.delete_workspace(workspace_id)
 
 
