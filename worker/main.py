@@ -23,7 +23,10 @@ WORKSPACE_IMAGE_CONTEXT = os.getenv(
 )
 WORKSPACE_STORAGE_ROOT = os.getenv("DEVBOX_WORKSPACE_STORAGE_ROOT", "/srv/devbox/workspaces")
 WORKSPACE_DISK_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
-workspace_storage = XFSWorkspaceStorage(WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA)
+WORKSPACE_INODE_LIMIT = int(os.getenv("DEVBOX_WORKSPACE_INODE_LIMIT", "200000"))
+workspace_storage = XFSWorkspaceStorage(
+    WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA, WORKSPACE_INODE_LIMIT
+)
 docker_client = docker.from_env()
 
 
