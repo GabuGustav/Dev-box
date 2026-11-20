@@ -18,7 +18,7 @@ class WorkspaceRead(BaseModel):
     status: str
     owner_id: str
     executor_id: str | None
-    volume_name: str | None
+    storage_ref: str | None
     created_at: datetime
     updated_at: datetime
 
