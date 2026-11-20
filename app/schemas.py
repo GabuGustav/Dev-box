@@ -17,6 +17,8 @@ class WorkspaceRead(BaseModel):
     branch: str
     status: str
     owner_id: str
+    executor_id: str | None
+    volume_name: str | None
     created_at: datetime
     updated_at: datetime
 
