@@ -126,3 +126,24 @@ def test_invalid_workspace_ids_are_rejected(tmp_path, workspace_id):
 def test_invalid_quota_configuration_is_rejected(tmp_path, quota):
     with pytest.raises(WorkspaceStorageError, match="positive size"):
         XFSWorkspaceStorage(str(tmp_path), quota)
+
+def test_missing_registry_with_existing_storage_fails_closed(tmp_path):
+    runner = FakeRunner()
+    storage = make_storage(tmp_path, runner)
+    (storage.root / "untracked-workspace-data").mkdir()
+
+    with pytest.raises(WorkspaceStorageError, match="registry is missing"):
+        storage.ensure_workspace(WORKSPACE_ID)
+
+
+def test_workspace_storage_must_be_the_mountpoint_not_a_subdirectory(tmp_path):
+    runner = FakeRunner(reported_target=str(tmp_path))
+    storage = make_storage(tmp_path, runner)
+
+    with pytest.raises(WorkspaceStorageError, match="dedicated mount point"):
+        storage.validate_backend()
+
+
+def test_workspace_storage_root_rejects_unsafe_command_characters(tmp_path):
+    with pytest.raises(WorkspaceStorageError, match="may contain only"):
+        XFSWorkspaceStorage(str(tmp_path / "unsafe path"), "10g")
