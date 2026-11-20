@@ -28,3 +28,12 @@ class WorkspaceRead(BaseModel):
 class PrincipalCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     principal_type: Literal["user", "agent"]
+
+
+
+class SnapshotRead(BaseModel):
+    snapshot_id: str
+    workspace_id: str
+    created_at: datetime
+    size_bytes: int = Field(ge=0)
+    sha256: str = Field(min_length=64, max_length=64)
