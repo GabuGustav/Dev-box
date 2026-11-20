@@ -114,22 +114,26 @@ class SnapshotStore:
         max_entries: int = 200_000,
     ) -> None:
         key = None
+        key_error = None
         if encryption_key:
             if not re.fullmatch(r"[A-Za-z0-9_-]{43}", encryption_key):
-                raise SnapshotError(
+                key_error = (
                     "Snapshot encryption key must be a 32-byte URL-safe base64 value."
                 )
-            try:
-                key = base64.urlsafe_b64decode(encryption_key + "=")
-            except (ValueError, TypeError) as exc:
-                raise SnapshotError("Snapshot encryption key must be URL-safe base64.") from exc
-            if len(key) != 32:
-                raise SnapshotError("Snapshot encryption key must decode to exactly 32 bytes.")
+            else:
+                try:
+                    key = base64.urlsafe_b64decode(encryption_key + "=")
+                except (ValueError, TypeError):
+                    key_error = "Snapshot encryption key must be URL-safe base64."
+                if key is not None and len(key) != 32:
+                    key = None
+                    key_error = "Snapshot encryption key must decode to exactly 32 bytes."
         if max_snapshots < 1 or max_snapshot_bytes < 1 or max_entries < 1:
             raise SnapshotError("Snapshot limits must be positive.")
         self.storage = storage
         self.workspace_storage = workspace_storage
         self.key = key
+        self.key_error = key_error
         self.max_snapshots = max_snapshots
         self.max_snapshot_bytes = max_snapshot_bytes
         self.max_entries = max_entries
@@ -161,7 +165,9 @@ class SnapshotStore:
 
     def _require_key(self) -> bytes:
         if self.key is None:
-            raise SnapshotError("Snapshot encryption key is not configured.")
+            raise SnapshotError(
+                self.key_error or "Snapshot encryption key is not configured."
+            )
         return self.key
 
     @staticmethod
