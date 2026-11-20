@@ -24,13 +24,13 @@ Default policy:
 - Run as non-root inside the workspace.
 - Drop unnecessary Linux capabilities.
 - Apply seccomp and mandatory access controls (AppArmor/SELinux) where available.
-- Use read-only base images and a dedicated writable workspace volume.
+- Use read-only base images and a dedicated writable workspace directory with filesystem-enforced project quotas.
 - Do not mount host root, sensitive host directories, or the container runtime socket.
 - Do not share writable caches between tenants unless the cache is designed for safe, content-addressed sharing.
-- Enforce CPU, memory, disk, process, file descriptor, and wall-clock quotas.
+- Enforce CPU, memory, disk block and inode, process, file descriptor, and wall-clock quotas.
 - Kill descendant processes and clean temporary resources on cancellation or deletion.
 
-Containers reduce risk but share the host kernel. For hostile multi-tenant workloads, evaluate microVMs or dedicated VMs as a stronger boundary.
+The trusted storage worker has Docker socket access and CAP_SYS_ADMIN to administer XFS quotas; compromise of that worker can compromise the host. Keep it private and treat it as a privileged control-plane component. Containers reduce risk but share the host kernel. For hostile multi-tenant workloads, evaluate microVMs or dedicated VMs as a stronger boundary.
 
 ## 4. Identity and authorization
 
