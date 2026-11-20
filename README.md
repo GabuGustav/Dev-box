@@ -27,6 +27,7 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 - [Implementation roadmap](ROADMAP.md)
 - [Security and isolation](SECURITY.md)
 - [Build and test system](BUILD_SYSTEM.md)
+- [Workspace storage backend](STORAGE.md)
 
 ## Stack
 
