@@ -116,6 +116,12 @@ Optional integration tests:
 # Use an empty, dedicated XFS test mount; run with permissions to manage XFS quotas.
 DEVBOX_TEST_XFS_ROOT=/mnt/devbox-xfs-test pytest tests/integration/test_xfs_quota.py
 
+# Verify encrypted snapshots across two dedicated XFS mounts.
+DEVBOX_TEST_XFS_ROOT=/mnt/devbox-workspace-test \
+DEVBOX_TEST_SNAPSHOT_XFS_ROOT=/mnt/devbox-snapshot-test \
+DEVBOX_TEST_SNAPSHOT_ENCRYPTION_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+pytest tests/integration/test_snapshot_storage.py
+
 # Also verify real Docker bind-mount isolation and persistence.
 DEVBOX_TEST_XFS_ROOT=/mnt/devbox-xfs-test \
 DEVBOX_RUN_DOCKER_INTEGRATION=1 \
