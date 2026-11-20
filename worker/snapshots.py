@@ -423,13 +423,19 @@ class SnapshotStore:
         for path in (stage, backup):
             if path.is_symlink() or (path.exists() and not path.is_dir()):
                 raise SnapshotError("Restore recovery path is not a safe directory.")
+        recovered = False
         if backup.exists():
             if workspace_directory.exists():
                 shutil.rmtree(backup)
             else:
                 os.replace(backup, workspace_directory)
+            recovered = True
         if stage.exists():
             shutil.rmtree(stage)
+        if recovered and workspace_directory.exists():
+            self.workspace_storage.mark_workspace_initialized(
+                workspace_id, workspace_directory
+            )
 
     def restore(self, workspace_id: str, snapshot_id: str, workspace_path: Path) -> dict:
         self._require_key()
@@ -461,6 +467,9 @@ class SnapshotStore:
             try:
                 os.replace(stage, workspace_directory)
                 self._fsync_directory(workspace_directory.parent)
+                self.workspace_storage.mark_workspace_initialized(
+                    workspace_id, workspace_directory
+                )
             except Exception:
                 if backup.exists() and not workspace_directory.exists():
                     os.replace(backup, workspace_directory)
