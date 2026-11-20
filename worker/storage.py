@@ -180,16 +180,22 @@ class XFSWorkspaceStorage:
                     "Workspace registry is missing while storage data exists; recover it before deletion."
                 )
             return
+        if directory.is_symlink() or (
+            directory.exists() and directory.resolve().parent != self.root.resolve()
+        ):
+            raise WorkspaceStorageError("Workspace storage path unexpectedly escaped its root.")
         connection = self._connect()
         try:
             row = connection.execute(
-                "SELECT project_id FROM workspace_projects WHERE workspace_id = ?",
+                "SELECT project_id, directory FROM workspace_projects WHERE workspace_id = ?",
                 (workspace_id,),
             ).fetchone()
         finally:
             connection.close()
         if row:
             project_id = int(row[0])
+            if row[1] != str(directory):
+                raise WorkspaceStorageError("Workspace storage registry path mismatch.")
             if directory.exists():
                 self._run(
                     "xfs_quota",
@@ -205,8 +211,10 @@ class XFSWorkspaceStorage:
                 f"limit -p bhard=0 ihard=0 {project_id}",
                 str(self.root),
             )
-        if directory.is_symlink():
-            raise WorkspaceStorageError("Workspace storage path unexpectedly became a symlink.")
+        elif directory.exists():
+            raise WorkspaceStorageError(
+                "Workspace directory exists without a project registry entry; refusing deletion."
+            )
         if directory.exists():
             shutil.rmtree(directory)
         connection = self._connect()
