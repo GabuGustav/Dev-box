@@ -41,7 +41,9 @@ class XFSWorkspaceStorage:
             raise WorkspaceStorageError("Workspace disk quota must be a positive size such as 10g.")
         self.root = Path(root)
         if not re.fullmatch(r"[A-Za-z0-9_./-]+", str(self.root)):
-            raise WorkspaceStorageError("Workspace storage root contains unsafe command characters.")
+            raise WorkspaceStorageError(
+                "Workspace storage root contains unsafe command characters."
+            )
         if inode_limit < 1:
             raise WorkspaceStorageError("Workspace inode limit must be a positive integer.")
         self.quota_limit = quota_limit.lower()
@@ -152,7 +154,8 @@ class XFSWorkspaceStorage:
         self.validate_backend()
         if not self.registry.exists() and any(self.root.iterdir()):
             raise WorkspaceStorageError(
-                "Workspace registry is missing while storage data exists; recover the registry before provisioning."
+                "Workspace registry is missing while storage data exists; "
+                "recover the registry before provisioning."
             )
         project_id = self._register_project(workspace_id, directory)
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
