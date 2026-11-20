@@ -181,10 +181,18 @@ class SnapshotStore:
             if entry.is_symlink():
                 raise SnapshotError("Snapshot directory contains an unexpected symbolic link.")
             if re.fullmatch(r"\.[0-9a-f]{32}\.dbxsnap\.tmp", entry.name):
-                entry.unlink(missing_ok=True)
+                try:
+                    entry.unlink(missing_ok=True)
+                except OSError as exc:
+                    raise SnapshotError("Unable to clean an interrupted snapshot file.") from exc
             elif re.fullmatch(r"[0-9a-f]{32}\.dbxsnap", entry.name):
                 if entry.name not in known_files:
-                    entry.unlink(missing_ok=True)
+                    try:
+                        entry.unlink(missing_ok=True)
+                    except OSError as exc:
+                        raise SnapshotError(
+                            "Unable to clean an orphaned encrypted snapshot."
+                        ) from exc
                 elif not entry.is_file():
                     raise SnapshotError("Registered snapshot path is not a regular file.")
             else:
@@ -557,7 +565,10 @@ class SnapshotStore:
             connection.commit()
         finally:
             connection.close()
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise SnapshotError("Unable to remove the encrypted snapshot file.") from exc
 
     def delete_workspace(self, workspace_id: str) -> None:
         self._workspace_directory(workspace_id)
@@ -581,8 +592,11 @@ class SnapshotStore:
             connection.commit()
         finally:
             connection.close()
-        for row in rows:
-            (directory / row[0]).unlink(missing_ok=True)
+        try:
+            for row in rows:
+                (directory / row[0]).unlink(missing_ok=True)
+        except OSError as exc:
+            raise SnapshotError("Unable to remove all workspace snapshots.") from exc
         self.storage.delete_workspace(workspace_id)
 
 
