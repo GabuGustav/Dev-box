@@ -20,7 +20,7 @@ Every boundary requires authentication, authorization, and validation.
 
 Default policy:
 - One isolated execution boundary and filesystem per workspace.
-- Separate process, mount, user, and network namespaces where supported.
+- Separate process, mount, user, IPC, and network namespaces where supported.
 - Run as non-root inside the workspace.
 - Drop unnecessary Linux capabilities.
 - Apply seccomp and mandatory access controls (AppArmor/SELinux) where available.
@@ -73,7 +73,7 @@ Apply DNS and IP-level controls to reduce DNS rebinding and SSRF risks. Network 
 - Store provider tokens in an encrypted credential store or secret manager.
 - Use least-privilege, repository-scoped, short-lived credentials.
 - Inject secrets only for the operation that needs them.
-- Never write credentials into repository files, images, command history, logs, artifacts, or environment snapshots.
+- Never intentionally write credentials into repository files, images, command history, logs, artifacts, or workspace snapshots.
 - Redact secrets from stdout/stderr and error messages.
 - Do not expose GitHub write credentials to read-only agents.
 - Revoke credentials when access is revoked or a workspace is deleted.
@@ -116,9 +116,9 @@ Provide:
 - Agent A cannot list, read, write, or execute in Agent B's workspace.
 - Guessing a valid workspace ID does not bypass authorization.
 - A revoked grant no longer authorizes access.
-- A workspace cannot read host files or another workspace's volume.
+- A workspace cannot read host files or another workspace's volume or processes.
 - A job cannot exceed configured resource or time limits.
 - A job cannot access cloud metadata or internal management endpoints.
 - Malicious filenames, symlinks, and archive entries cannot escape the workspace.
-- Secrets do not appear in logs, artifacts, snapshots, or command history.
+- Operation-scoped provider credentials do not persist into workspace files or snapshots; credentials already written into a workspace are treated as sensitive encrypted snapshot content and must be rotated or removed.
 - Cancellation terminates child processes and releases resources.
