@@ -1,6 +1,5 @@
 import os
 import secrets
-from pathlib import Path
 
 import pytest
 
