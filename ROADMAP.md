@@ -22,18 +22,25 @@ This roadmap sequences the project so each phase produces a testable result. Est
 - [x] Implement health checks, structured logging, and audit event foundation.
 - [x] Add automated tests and CI.
 
-**Exit criteria:** authenticated clients can create and list metadata-only workspaces. Implemented on `phase-1-core-platform`; CI must pass before merge.
+**Exit criteria:** authenticated clients can create and list metadata-only workspaces. Implemented on `phase-1-core-platform`; CI passed for that branch.
 
 ## Phase 2 — Isolated persistent workspaces
 
-- [ ] Implement worker supervisor and container provisioning.
-- [ ] Enforce per-workspace filesystem and process isolation.
-- [ ] Add CPU, memory, disk, process, and timeout limits.
-- [ ] Attach durable volumes and verify restart recovery.
-- [ ] Implement pause, resume, snapshot, and deletion lifecycle.
-- [ ] Test that one workspace cannot access another workspace's files or processes.
+- [x] Add a separate trusted worker supervisor; keep Docker socket access out of the API and workspace containers.
+- [x] Provision one non-root container and named persistent volume per workspace.
+- [x] Add owner-scoped start, stop, pause, resume, and delete API operations.
+- [x] Apply container CPU, memory, PID, capability, read-only-rootfs, and network-isolation settings.
+- [x] Add database migration for executor and volume references.
+- [x] Add mocked API lifecycle and cross-principal authorization tests.
+- [ ] Enforce a hard per-workspace disk quota on the selected storage backend.
+- [ ] Implement snapshot and restore.
+- [ ] Verify volume persistence and worker recovery using Docker integration tests.
+- [ ] Add adversarial cross-container filesystem/process isolation tests.
+- [ ] Add execution wall-clock limits with the job runner in Phase 4.
 
-**Exit criteria:** two agents can operate concurrently in separate persistent workspaces without cross-access.
+**Current Phase 2 boundary:** the executor creates persistent volumes and applies container-level hardening. The default Docker local volume driver does not provide a portable hard disk quota. Workspaces have no network access yet, so repository cloning and dependency installation wait for controlled egress in Phase 3.
+
+**Exit criteria:** not yet met. Do not mark Phase 2 complete until storage quotas, recovery, and integration isolation tests pass.
 
 ## Phase 3 — Git and repository discovery
 
@@ -57,7 +64,7 @@ This roadmap sequences the project so each phase produces a testable result. Est
 - [ ] Store artifacts and associate them with jobs.
 - [ ] Add static analysis and test result summaries.
 
-**Exit criteria:** an agent can build and test a repository, inspect a failure, edit code, rerun, and compare results.
+**Exit criteria:** an agent can build and test a repository, inspect a failure, fix code, rerun, and compare results.
 
 ## Phase 5 — Agent interfaces
 
