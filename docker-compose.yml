@@ -14,14 +14,39 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker.Dockerfile
+    environment:
+      DEVBOX_EXECUTOR_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
+      DEVBOX_WORKSPACE_CPU: ${WORKSPACE_CPU_LIMIT:-1.0}
+      DEVBOX_WORKSPACE_MEMORY: ${WORKSPACE_MEMORY_LIMIT:-1g}
+      DEVBOX_WORKSPACE_PIDS: ${WORKSPACE_PIDS_LIMIT:-256}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   api:
     build: .
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://devbox:devbox@db:5432/devbox
+      EXECUTOR_SERVICE_URL: http://worker:9000
+      EXECUTOR_SERVICE_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      worker:
+        condition: service_healthy
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
 volumes:
   devbox_postgres:
