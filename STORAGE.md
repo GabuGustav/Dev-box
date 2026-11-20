@@ -79,3 +79,24 @@ The API's storage_ref is an opaque backend reference, not a Docker volume name o
 The worker has both Docker socket access and CAP_SYS_ADMIN; compromise of this service can compromise the host. Keep it private, authenticate all internal requests, restrict who can deploy or modify it, and monitor its logs. This is a trusted infrastructure component, not an untrusted workspace.
 
 Do not call this container-level isolation a VM boundary. For hostile multi-tenant execution, evaluate microVM isolation before production exposure.
+
+
+## Recovery and integration verification
+
+The worker service is configured to restart unless explicitly stopped. Workspace containers are independently managed by Docker and use a deterministic name plus a restart policy. After a worker restart, an API start/resume request finds the existing container, verifies that its /workspace bind mount still points at the expected XFS directory, and reuses it. A container with a legacy or unexpected mount is rejected without deleting its old data.
+
+This is request-driven recovery, not a background reconciliation controller. The database status can be stale after an abrupt host or daemon failure until the next lifecycle request. Automatic reconciliation and durable snapshot/restore remain Phase 2 work.
+
+Optional integration tests:
+
+```bash
+# Use an empty, dedicated XFS test mount; run with permissions to manage XFS quotas.
+DEVBOX_TEST_XFS_ROOT=/mnt/devbox-xfs-test pytest tests/integration/test_xfs_quota.py
+
+# Also verify real Docker bind-mount isolation and persistence.
+DEVBOX_TEST_XFS_ROOT=/mnt/devbox-xfs-test \
+DEVBOX_RUN_DOCKER_INTEGRATION=1 \
+pytest tests/integration/
+```
+
+These tests are opt-in because they modify filesystem quota state and create Docker containers. Never point them at a filesystem containing valuable data or live workspaces.
