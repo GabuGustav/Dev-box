@@ -1,7 +1,7 @@
 """Initial DevBox identity and workspace metadata schema."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0001_initial"
 down_revision = None
@@ -21,7 +21,12 @@ def upgrade() -> None:
     op.create_table(
         "api_keys",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("principal_id", sa.String(length=36), sa.ForeignKey("principals.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "principal_id",
+            sa.String(length=36),
+            sa.ForeignKey("principals.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("key_hash", sa.String(length=64), nullable=False, unique=True),
         sa.Column("key_prefix", sa.String(length=24), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -40,8 +45,18 @@ def upgrade() -> None:
         "workspaces",
         sa.Column("id", sa.String(length=64), primary_key=True),
         sa.Column("name", sa.String(length=120), nullable=False),
-        sa.Column("owner_id", sa.String(length=36), sa.ForeignKey("principals.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("repository_id", sa.String(length=36), sa.ForeignKey("repositories.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column(
+            "owner_id",
+            sa.String(length=36),
+            sa.ForeignKey("principals.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column(
+            "repository_id",
+            sa.String(length=36),
+            sa.ForeignKey("repositories.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
         sa.Column("branch", sa.String(length=255), nullable=False, server_default="main"),
         sa.Column("status", sa.String(length=30), nullable=False, server_default="registered"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -52,7 +67,11 @@ def upgrade() -> None:
     op.create_table(
         "audit_events",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("actor_id", sa.String(length=36), sa.ForeignKey("principals.id", ondelete="SET NULL")),
+        sa.Column(
+            "actor_id",
+            sa.String(length=36),
+            sa.ForeignKey("principals.id", ondelete="SET NULL"),
+        ),
         sa.Column("action", sa.String(length=100), nullable=False),
         sa.Column("target_type", sa.String(length=50), nullable=False),
         sa.Column("target_id", sa.String(length=64)),
