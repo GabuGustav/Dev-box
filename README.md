@@ -40,8 +40,8 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 
 ## Run locally
 
-1. Install Docker Desktop with Linux containers enabled and Python 3.12+.
-2. Prepare a dedicated Linux XFS filesystem for workspace data. Mount it with project quotas enabled (`prjquota` or `pquota`) at `/srv/devbox/workspaces` (or your chosen `WORKSPACE_STORAGE_ROOT`). The mount must already exist before Compose starts. Do not format a disk that contains data; use a dedicated data volume and follow your host OS's XFS setup procedure.
+1. For actual workspace provisioning, use a Linux host with Docker Engine. Docker Desktop on Windows/macOS can be used for API and mocked-test development, but it does not provide the required dedicated XFS host mount.
+2. Prepare a dedicated Linux XFS filesystem for workspace data. Mount it with project quotas enabled (`prjquota` or `pquota`) at `/srv/devbox/workspaces` (or your chosen `WORKSPACE_STORAGE_ROOT`). The mount must already exist before Compose starts and be visible at the same absolute path inside the worker and to the Docker daemon. Do not format a disk that contains data; use a dedicated data volume and follow your host OS's XFS setup procedure.
 3. Copy `.env.example` to `.env`.
 4. Replace `EXECUTOR_SERVICE_TOKEN` with a fresh random secret. For example:
 
