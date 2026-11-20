@@ -216,3 +216,55 @@ def test_invalid_encryption_key_does_not_block_snapshot_deletion(tmp_path):
         store.create(WORKSPACE_ID, workspace_storage.ensure_workspace(WORKSPACE_ID))
 
     assert store.list(WORKSPACE_ID) == []
+
+
+
+def test_orphaned_snapshot_and_partial_archive_files_are_reconciled(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    snapshot_directory = store.storage._workspace_path(WORKSPACE_ID)[1]
+    encrypted_file = snapshot_directory / f"{snapshot['snapshot_id']}.dbxsnap"
+    temporary_file = snapshot_directory / f".{'c' * 32}.dbxsnap.tmp"
+    temporary_file.write_bytes(b"partial")
+    connection = store._connect()
+    try:
+        connection.execute(
+            "DELETE FROM snapshots WHERE workspace_id = ? AND snapshot_id = ?",
+            (WORKSPACE_ID, snapshot["snapshot_id"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert store.list(WORKSPACE_ID) == []
+    assert not encrypted_file.exists()
+    assert not temporary_file.exists()
+
+
+def test_missing_snapshot_metadata_registry_preserves_encrypted_files(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    snapshot_directory = store.storage._workspace_path(WORKSPACE_ID)[1]
+    encrypted_file = snapshot_directory / f"{snapshot['snapshot_id']}.dbxsnap"
+    store.registry.unlink()
+
+    with pytest.raises(SnapshotError, match="metadata registry is missing"):
+        store.list(WORKSPACE_ID)
+
+    assert encrypted_file.is_file()
+
+
+def test_missing_encrypted_file_is_detected_from_snapshot_metadata(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_file = (
+        store.storage._workspace_path(WORKSPACE_ID)[1]
+        / f"{snapshot['snapshot_id']}.dbxsnap"
+    )
+    encrypted_file.unlink()
+
+    with pytest.raises(SnapshotError, match="missing encrypted file"):
+        store.list(WORKSPACE_ID)
