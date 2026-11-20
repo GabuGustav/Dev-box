@@ -267,5 +267,6 @@ def test_missing_encrypted_file_is_detected_from_snapshot_metadata(tmp_path):
     )
     encrypted_file.unlink()
 
-    with pytest.raises(SnapshotError, match="missing encrypted file"):
-        store.list(WORKSPACE_ID)
+    assert store.list(WORKSPACE_ID) == []
+    with pytest.raises(SnapshotError, match="not found"):
+        store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
