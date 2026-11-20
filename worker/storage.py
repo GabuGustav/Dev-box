@@ -215,7 +215,10 @@ class XFSWorkspaceStorage:
     def prepare_project_directory(
         self, workspace_id: str, directory: Path, project_id: int
     ) -> None:
-        _, _ = self._workspace_path(workspace_id)
+        digest, workspace_directory = self._workspace_path(workspace_id)
+        expected_staging = self.root / f".{workspace_directory.name}.restore-stage"
+        if directory != expected_staging or directory.name != f".{digest}.restore-stage":
+            raise WorkspaceStorageError("Staging directory name does not match the workspace.")
         if directory.parent.resolve() != self.root.resolve():
             raise WorkspaceStorageError(
                 "Staging directory must be a direct child of the storage root."
