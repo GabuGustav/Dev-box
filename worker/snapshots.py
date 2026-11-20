@@ -189,7 +189,12 @@ class SnapshotStore:
     def create(self, workspace_id: str, workspace_path: Path) -> dict:
         key = self._require_key()
         _, expected_workspace_path = self.workspace_storage._workspace_path(workspace_id)
-        if workspace_path != expected_workspace_path:
+        if (
+            workspace_path != expected_workspace_path
+            or workspace_path.is_symlink()
+            or not workspace_path.is_dir()
+            or workspace_path.resolve().parent != self.workspace_storage.root.resolve()
+        ):
             raise SnapshotError("Snapshot source does not match the assigned workspace directory.")
         snapshot_directory = self._workspace_directory(workspace_id)
         connection = self._connect()
@@ -305,6 +310,8 @@ class SnapshotStore:
             connection.close()
         if row is None:
             raise SnapshotError("Snapshot not found.")
+        if not re.fullmatch(r"[0-9a-f]{32}\\.dbxsnap", row[0]):
+            raise SnapshotError("Snapshot registry contains an unsafe filename.")
         path = directory / row[0]
         if path.parent != directory or path.is_symlink() or not path.is_file():
             raise SnapshotError("Snapshot storage entry is missing or unsafe.")
@@ -466,7 +473,12 @@ class SnapshotStore:
             connection.close()
         directory = self.storage._workspace_path(workspace_id)[1]
         for row in rows:
-            (directory / row[0]).unlink(missing_ok=True)
+            if not re.fullmatch(r"[0-9a-f]{32}\\.dbxsnap", row[0]):
+                raise SnapshotError("Snapshot registry contains an unsafe filename.")
+            path = directory / row[0]
+            if path.parent != directory or path.is_symlink():
+                raise SnapshotError("Snapshot registry path is unsafe.")
+            path.unlink(missing_ok=True)
         connection = self._connect()
         try:
             connection.execute("DELETE FROM snapshots WHERE workspace_id = ?", (workspace_id,))
