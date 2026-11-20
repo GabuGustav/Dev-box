@@ -16,6 +16,7 @@ services:
       retries: 10
 
   worker:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: worker.Dockerfile
