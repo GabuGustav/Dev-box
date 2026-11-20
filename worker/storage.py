@@ -218,8 +218,29 @@ class XFSWorkspaceStorage:
         )
         return directory
 
+    def set_project_quota(self, workspace_id: str, multiplier: int = 1) -> None:
+        self._workspace_path(workspace_id)
+        if multiplier < 1 or multiplier > 10:
+            raise WorkspaceStorageError("Workspace quota multiplier must be between 1 and 10.")
+        match = re.fullmatch(r"([1-9][0-9]*)([kmgt]?)", self.quota_limit)
+        if match is None:
+            raise WorkspaceStorageError("Workspace disk quota configuration is invalid.")
+        quota = f"{int(match.group(1)) * multiplier}{match.group(2)}"
+        self._run(
+            "xfs_quota",
+            "-x",
+            "-c",
+            f"limit -p bhard={quota} ihard={self.inode_limit * multiplier} "
+            f"{self._project_id(workspace_id)}",
+            str(self.root),
+        )
+
     def prepare_project_directory(
-        self, workspace_id: str, directory: Path, project_id: int
+        self,
+        workspace_id: str,
+        directory: Path,
+        project_id: int,
+        quota_multiplier: int = 1,
     ) -> None:
         digest, workspace_directory = self._workspace_path(workspace_id)
         expected_staging = self.root / f".{workspace_directory.name}.restore-stage"
@@ -248,13 +269,7 @@ class XFSWorkspaceStorage:
             f"project -s -p {directory} {project_id}",
             str(self.root),
         )
-        self._run(
-            "xfs_quota",
-            "-x",
-            "-c",
-            f"limit -p bhard={self.quota_limit} ihard={self.inode_limit} {project_id}",
-            str(self.root),
-        )
+        self.set_project_quota(workspace_id, quota_multiplier)
 
     def delete_workspace(self, workspace_id: str) -> None:
         _, directory = self._workspace_path(workspace_id)
