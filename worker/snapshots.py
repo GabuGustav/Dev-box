@@ -452,13 +452,17 @@ class SnapshotStore:
             rows = connection.execute(
                 "SELECT filename FROM snapshots WHERE workspace_id = ?", (workspace_id,)
             ).fetchall()
-            connection.execute("DELETE FROM snapshots WHERE workspace_id = ?", (workspace_id,))
-            connection.commit()
         finally:
             connection.close()
         directory = self.storage._workspace_path(workspace_id)[1]
         for row in rows:
             (directory / row[0]).unlink(missing_ok=True)
+        connection = self._connect()
+        try:
+            connection.execute("DELETE FROM snapshots WHERE workspace_id = ?", (workspace_id,))
+            connection.commit()
+        finally:
+            connection.close()
         self.storage.delete_workspace(workspace_id)
 
 
