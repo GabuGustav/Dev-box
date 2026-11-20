@@ -59,6 +59,18 @@ class FakeContainers:
         return container
 
 
+class FakeStorage:
+    def __init__(self, path):
+        self.path = path
+        self.deleted = []
+
+    def ensure_workspace(self, workspace_id):
+        return self.path
+
+    def delete_workspace(self, workspace_id):
+        self.deleted.append(workspace_id)
+
+
 class FakeDockerClient:
     def __init__(self):
         self.volumes = FakeVolumes()
@@ -83,7 +95,7 @@ def test_invalid_workspace_ids_are_rejected(workspace_id):
     assert error.value.status_code == 422
 
 
-def test_start_creates_separate_volume_and_hardened_container(monkeypatch):
+def test_start_creates_hardened_container_on_workspace_storage(monkeypatch, tmp_path):
     fake = FakeDockerClient()
     monkeypatch.setattr(executor, "docker_client", fake)
     monkeypatch.setattr(executor, "NotFound", MissingResource)
@@ -91,12 +103,14 @@ def test_start_creates_separate_volume_and_hardened_container(monkeypatch):
     monkeypatch.setattr(executor, "WORKSPACE_CPU", 1.5)
     monkeypatch.setattr(executor, "WORKSPACE_MEMORY", "768m")
     monkeypatch.setattr(executor, "WORKSPACE_PIDS", 128)
+    storage_path = tmp_path / "workspace"
+    storage_path.mkdir()
+    monkeypatch.setattr(executor, "workspace_storage", FakeStorage(storage_path))
 
     result = executor.start_workspace("dbx_abcdefghijklmnopqrstuv")
 
     assert result["state"] == "running"
     assert result["container_id"] == "container-123"
-    assert len(fake.volumes.created) == 1
     assert len(fake.containers.created) == 1
 
     container = fake.containers.created[0][1]
@@ -109,7 +123,9 @@ def test_start_creates_separate_volume_and_hardened_container(monkeypatch):
     assert container["nano_cpus"] == 1_500_000_000
     assert container["pids_limit"] == 128
     assert container["restart_policy"] == {"Name": "unless-stopped"}
-    assert list(container["volumes"].values()) == [{"bind": "/workspace", "mode": "rw"}]
+    assert container["volumes"] == {
+        str(storage_path): {"bind": "/workspace", "mode": "rw"}
+    }
 
 
 def test_internal_service_requires_configured_token(monkeypatch):
