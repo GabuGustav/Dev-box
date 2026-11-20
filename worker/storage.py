@@ -88,9 +88,11 @@ class XFSWorkspaceStorage:
         state = self._run(
             "xfs_quota", "-x", "-c", "state -p", str(self.root)
         )
-        if not re.search(r"Enforcement:\s*ON", state, flags=re.IGNORECASE):
+        accounting_enabled = re.search(r"Accounting:\s*ON", state, flags=re.IGNORECASE)
+        enforcement_enabled = re.search(r"Enforcement:\s*ON", state, flags=re.IGNORECASE)
+        if not accounting_enabled or not enforcement_enabled:
             raise WorkspaceStorageError(
-                "XFS project quota enforcement is not active on the workspace mount."
+                "XFS project quota accounting and enforcement must both be active."
             )
 
     def _workspace_path(self, workspace_id: str) -> tuple[str, Path]:
