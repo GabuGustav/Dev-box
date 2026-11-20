@@ -11,15 +11,22 @@ WORKSPACE_ID = "dbx_abcdefghijklmnopqrstuv"
 
 
 class FakeRunner:
-    def __init__(self, filesystem="xfs rw,relatime,prjquota", state="Project quota state: Accounting: ON, Enforcement: ON"):
+    def __init__(
+        self,
+        filesystem="xfs rw,relatime,prjquota",
+        state="Project quota state: Accounting: ON, Enforcement: ON",
+        reported_target=None,
+    ):
         self.filesystem = filesystem
         self.state = state
+        self.reported_target = reported_target
         self.calls = []
 
     def __call__(self, args, **kwargs):
         self.calls.append((args, kwargs))
         if args[0] == "findmnt":
-            output = self.filesystem
+            target = self.reported_target or args[-1]
+            output = f"{target} {self.filesystem}"
         elif args[0] == "xfs_quota" and args[3] == "state -p":
             output = self.state
         else:
