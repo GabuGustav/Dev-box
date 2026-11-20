@@ -28,12 +28,15 @@ class SnapshotError(RuntimeError):
 
 
 class _EncryptingWriter:
-    def __init__(self, target, encryptor) -> None:
+    def __init__(self, target, encryptor, max_bytes: int) -> None:
         self.target = target
         self.encryptor = encryptor
+        self.max_bytes = max_bytes
         self.bytes_written = 0
 
     def write(self, data: bytes) -> int:
+        if self.bytes_written + len(data) > self.max_bytes:
+            raise SnapshotError("Snapshot exceeds the configured archive size limit.")
         encrypted = self.encryptor.update(data)
         self.target.write(encrypted)
         self.bytes_written += len(data)
@@ -177,6 +180,9 @@ class SnapshotStore:
         return member
 
     def create(self, workspace_id: str, workspace_path: Path) -> dict:
+        _, expected_workspace_path = self.workspace_storage._workspace_path(workspace_id)
+        if workspace_path != expected_workspace_path:
+            raise SnapshotError("Snapshot source does not match the assigned workspace directory.")
         snapshot_directory = self._workspace_directory(workspace_id)
         connection = self._connect()
         try:
@@ -205,7 +211,7 @@ class SnapshotStore:
         try:
             with temporary_path.open("xb") as output:
                 output.write(MAGIC + nonce)
-                writer = _EncryptingWriter(output, encryptor)
+                writer = _EncryptingWriter(output, encryptor, self.max_snapshot_bytes)
                 with tarfile.open(fileobj=writer, mode="w|") as archive:
                     archive.add(
                         str(workspace_path),
@@ -215,8 +221,6 @@ class SnapshotStore:
                     )
                 writer.flush()
                 plaintext_size = writer.bytes_written
-                if plaintext_size > self.max_snapshot_bytes:
-                    raise SnapshotError("Snapshot exceeds the configured archive size limit.")
                 output.write(encryptor.finalize())
                 output.write(encryptor.tag)
                 output.flush()
@@ -430,6 +434,7 @@ class SnapshotStore:
 
     def delete(self, workspace_id: str, snapshot_id: str) -> None:
         path, _ = self._snapshot_record(workspace_id, snapshot_id)
+        path.unlink(missing_ok=True)
         connection = self._connect()
         try:
             connection.execute(
@@ -439,7 +444,6 @@ class SnapshotStore:
             connection.commit()
         finally:
             connection.close()
-        path.unlink(missing_ok=True)
 
     def delete_workspace(self, workspace_id: str) -> None:
         self._workspace_directory(workspace_id)
