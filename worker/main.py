@@ -523,8 +523,12 @@ def delete_workspace(workspace_id: str) -> dict:
     container_name, volume_name = names_for(workspace_id)
     try:
         snapshot_store.recover_restore(workspace_id)
-        workspace_storage.validate_backend()
-    except WorkspaceStorageError as exc:
+        _, workspace_path = workspace_storage._workspace_path(workspace_id)
+        if workspace_path.exists() or workspace_path.is_symlink():
+            workspace_storage.ensure_workspace(workspace_id)
+        else:
+            workspace_storage.validate_backend()
+    except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         container = docker_client.containers.get(container_name)
