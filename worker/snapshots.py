@@ -29,6 +29,14 @@ class SnapshotError(RuntimeError):
     """Raised when snapshot creation, validation, or restoration fails."""
 
 
+class SnapshotConflict(SnapshotError):
+    """Raised when the requested snapshot operation conflicts with policy."""
+
+
+class SnapshotNotFound(SnapshotError):
+    """Raised when a snapshot does not belong to the requested workspace."""
+
+
 class _EncryptingWriter:
     def __init__(self, target, encryptor, max_bytes: int) -> None:
         self.target = target
@@ -211,7 +219,7 @@ class SnapshotStore:
                 "SELECT COUNT(*) FROM snapshots WHERE workspace_id = ?", (workspace_id,)
             ).fetchone()[0]
             if count >= self.max_snapshots:
-                raise SnapshotError(
+                raise SnapshotConflict(
                     f"Snapshot retention limit reached ({self.max_snapshots}). "
                     "Delete an older snapshot before creating another."
                 )
@@ -306,7 +314,7 @@ class SnapshotStore:
 
     def _snapshot_record(self, workspace_id: str, snapshot_id: str) -> tuple[Path, str]:
         if not SNAPSHOT_ID_PATTERN.fullmatch(snapshot_id):
-            raise SnapshotError("Invalid snapshot ID.")
+            raise SnapshotNotFound("Snapshot not found.")
         directory = self._workspace_directory(workspace_id)
         connection = self._connect()
         try:
@@ -318,7 +326,7 @@ class SnapshotStore:
         finally:
             connection.close()
         if row is None:
-            raise SnapshotError("Snapshot not found.")
+            raise SnapshotNotFound("Snapshot not found.")
         if not re.fullmatch(r"[0-9a-f]{32}\.dbxsnap", row[0]):
             raise SnapshotError("Snapshot registry contains an unsafe filename.")
         path = directory / row[0]
