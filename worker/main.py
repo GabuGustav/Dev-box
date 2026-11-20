@@ -212,7 +212,7 @@ def resume_workspace(workspace_id: str) -> dict:
         return {
             "workspace_id": workspace_id,
             "container_id": container.id,
-            "volume_name": volume_name,
+            "storage_ref": volume_name,
             "state": container.status,
         }
     except NotFound as exc:
