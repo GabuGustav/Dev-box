@@ -148,6 +148,8 @@ def test_missing_key_blocks_create_and_restore_but_allows_deletion(tmp_path):
     assert store.list(WORKSPACE_ID) == []
     store.delete_workspace(WORKSPACE_ID)
     assert not snapshot_storage._workspace_path(WORKSPACE_ID)[1].exists()
+    store.delete_workspace(WORKSPACE_ID)
+    assert not snapshot_storage._workspace_path(WORKSPACE_ID)[1].exists()
 
 
 def test_snapshot_creation_rejects_symlinks_that_escape_workspace(tmp_path):
