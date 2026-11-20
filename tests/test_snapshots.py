@@ -61,6 +61,19 @@ def test_snapshot_round_trip_restores_exact_workspace_contents(tmp_path):
     assert store.list(WORKSPACE_ID)[0]["snapshot_id"] == snapshot["snapshot_id"]
 
 
+def test_snapshot_can_restore_a_missing_registered_workspace(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "recovered.txt").write_text("recover me", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    workspace.rmdir()
+
+    result = store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert result["state"] == "restored"
+    assert (workspace / "recovered.txt").read_text(encoding="utf-8") == "recover me"
+
+
 def test_snapshot_is_encrypted_and_authenticated(tmp_path):
     store, workspace_storage = make_store(tmp_path)
     workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
