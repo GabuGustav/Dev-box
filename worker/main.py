@@ -200,10 +200,24 @@ def pause_workspace(workspace_id: str) -> dict:
     dependencies=[Depends(require_service_token)],
 )
 def resume_workspace(workspace_id: str) -> dict:
-    container_name, volume_name = names_for(workspace_id)
+    container_name, storage_name = names_for(workspace_id)
+    try:
+        workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    except WorkspaceStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         container = docker_client.containers.get(container_name)
         container.reload()
+        mounts = container.attrs.get("Mounts", [])
+        workspace_mount = next(
+            (mount for mount in mounts if mount.get("Destination") == "/workspace"),
+            None,
+        )
+        if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+            raise HTTPException(
+                status_code=409,
+                detail="Existing workspace is not attached to its assigned XFS storage.",
+            )
         if container.status == "paused":
             container.unpause()
         elif container.status != "running":
@@ -212,7 +226,7 @@ def resume_workspace(workspace_id: str) -> dict:
         return {
             "workspace_id": workspace_id,
             "container_id": container.id,
-            "storage_ref": volume_name,
+            "storage_ref": storage_name,
             "state": container.status,
         }
     except NotFound as exc:
