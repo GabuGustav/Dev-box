@@ -145,11 +145,14 @@ class XFSWorkspaceStorage:
     def ensure_workspace(self, workspace_id: str) -> Path:
         self.validate_backend()
         _, directory = self._workspace_path(workspace_id)
-        self.root.mkdir(parents=True, exist_ok=True)
+        if not self.registry.exists() and any(self.root.iterdir()):
+            raise WorkspaceStorageError(
+                "Workspace registry is missing while storage data exists; recover the registry before provisioning."
+            )
+        project_id = self._register_project(workspace_id, directory)
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if directory.is_symlink() or directory.resolve().parent != self.root.resolve():
             raise WorkspaceStorageError("Workspace storage directory escaped its root.")
-        project_id = self._register_project(workspace_id, directory)
         self._run(
             "xfs_quota",
             "-x",
