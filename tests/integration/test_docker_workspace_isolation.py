@@ -90,7 +90,6 @@ def test_workspace_mount_is_private_and_survives_container_replacement():
             client.close()
 
 
-
 def test_workspace_containers_have_private_process_namespaces():
     client = docker.from_env()
     try:
@@ -133,8 +132,9 @@ def test_workspace_containers_have_private_process_namespaces():
             first_path,
             "from pathlib import Path; "
             "marker='DEVBOX_'+'AGENT_B_'+'PROCESS_MARKER'; "
-            "visible=any(marker.encode() in p.read_bytes() "
-            "for p in Path('/proc').glob('[0-9]*/cmdline')); "
+            "visible=False; "
+            "paths=Path('/proc').glob('[0-9]*/cmdline'); "
+            "exec(\"for p in paths:\\n try:\\n  visible |= marker.encode() in p.read_bytes()\\n except OSError:\\n  pass\"); "
             "assert not visible",
         )
         assert output == b""
