@@ -44,7 +44,7 @@ def names_for(workspace_id: str) -> tuple[str, str]:
     if not WORKSPACE_ID_PATTERN.fullmatch(workspace_id):
         raise HTTPException(status_code=422, detail="Invalid workspace ID.")
     digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
-    return f"devbox-ws-{digest}", f"devbox-vol-{digest}"
+    return f"devbox-ws-{digest}", f"xfs-{digest}"
 
 
 def ensure_image() -> None:
