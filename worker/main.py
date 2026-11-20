@@ -4,7 +4,9 @@ import hmac
 import logging
 import os
 import re
-from contextlib import asynccontextmanager
+import threading
+from contextlib import asynccontextmanager, contextmanager
+from functools import wraps
 
 import docker
 from docker.errors import APIError, ImageNotFound, NotFound
@@ -70,6 +72,28 @@ def names_for(workspace_id: str) -> tuple[str, str]:
     return f"devbox-ws-{digest}", f"xfs-{digest}"
 
 
+_workspace_locks: dict[str, threading.RLock] = {}
+_workspace_locks_guard = threading.Lock()
+
+
+@contextmanager
+def workspace_lock(workspace_id: str):
+    names_for(workspace_id)
+    with _workspace_locks_guard:
+        lock = _workspace_locks.setdefault(workspace_id, threading.RLock())
+    with lock:
+        yield
+
+
+def serialize_workspace_operation(function):
+    @wraps(function)
+    def wrapped(workspace_id: str, *args, **kwargs):
+        with workspace_lock(workspace_id):
+            return function(workspace_id, *args, **kwargs)
+
+    return wrapped
+
+
 def ensure_image() -> None:
     try:
         docker_client.images.get(IMAGE_NAME)
@@ -120,21 +144,33 @@ def reconcile_managed_containers() -> int:
                 _stop_unsafe_container(container, "managed workspace labels are missing")
                 stopped += 1
                 continue
-            expected_name, _ = names_for(workspace_id)
-            if container.name != expected_name:
-                _stop_unsafe_container(container, "container name does not match workspace ID")
-                stopped += 1
-                continue
-            snapshot_store.recover_restore(workspace_id)
-            workspace_path = workspace_storage.ensure_workspace(workspace_id)
-            mounts = container.attrs.get("Mounts", [])
-            workspace_mount = next(
-                (mount for mount in mounts if mount.get("Destination") == "/workspace"),
-                None,
-            )
-            if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
-                _stop_unsafe_container(container, "workspace bind mount does not match XFS storage")
-                stopped += 1
+            with workspace_lock(workspace_id):
+                container.reload()
+                labels = container.attrs.get("Config", {}).get("Labels") or {}
+                if labels.get("devbox.managed") != "true":
+                    _stop_unsafe_container(container, "managed workspace label changed")
+                    stopped += 1
+                    continue
+                expected_name, _ = names_for(workspace_id)
+                if container.name != expected_name:
+                    _stop_unsafe_container(container, "container name does not match workspace ID")
+                    stopped += 1
+                    continue
+                snapshot_store.recover_restore(workspace_id)
+                workspace_path = workspace_storage.ensure_workspace(workspace_id)
+                mounts = container.attrs.get("Mounts", [])
+                workspace_mount = next(
+                    (mount for mount in mounts if mount.get("Destination") == "/workspace"),
+                    None,
+                )
+                if (
+                    workspace_mount is None
+                    or workspace_mount.get("Source") != str(workspace_path)
+                ):
+                    _stop_unsafe_container(
+                        container, "workspace bind mount does not match XFS storage"
+                    )
+                    stopped += 1
         except Exception as exc:
             _stop_unsafe_container(container, f"workspace storage validation failed: {exc}")
             stopped += 1
@@ -186,6 +222,7 @@ def health() -> dict[str, str]:
     "/internal/workspaces/{workspace_id}/start",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def start_workspace(workspace_id: str) -> dict:
     container_name, storage_name = names_for(workspace_id)
     try:
@@ -251,6 +288,7 @@ def start_workspace(workspace_id: str) -> dict:
     "/internal/workspaces/{workspace_id}/stop",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def stop_workspace(workspace_id: str) -> dict:
     container_name, volume_name = names_for(workspace_id)
     try:
@@ -281,6 +319,7 @@ def stop_workspace(workspace_id: str) -> dict:
     "/internal/workspaces/{workspace_id}/pause",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def pause_workspace(workspace_id: str) -> dict:
     container_name, volume_name = names_for(workspace_id)
     try:
@@ -306,6 +345,7 @@ def pause_workspace(workspace_id: str) -> dict:
     "/internal/workspaces/{workspace_id}/resume",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def resume_workspace(workspace_id: str) -> dict:
     container_name, storage_name = names_for(workspace_id)
     try:
@@ -348,6 +388,7 @@ def resume_workspace(workspace_id: str) -> dict:
     "/internal/workspaces/{workspace_id}/snapshots",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def create_snapshot(workspace_id: str) -> dict:
     store = require_snapshot_store()
     container_name, _ = names_for(workspace_id)
@@ -395,6 +436,7 @@ def create_snapshot(workspace_id: str) -> dict:
     "/internal/workspaces/{workspace_id}/snapshots",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def list_snapshots(workspace_id: str) -> dict:
     store = require_snapshot_store()
     try:
@@ -407,6 +449,7 @@ def list_snapshots(workspace_id: str) -> dict:
     "/internal/workspaces/{workspace_id}/snapshots/{snapshot_id}/restore",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
     store = require_snapshot_store()
     container_name, _ = names_for(workspace_id)
@@ -448,6 +491,7 @@ def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
     "/internal/workspaces/{workspace_id}/snapshots/{snapshot_id}",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def delete_snapshot(workspace_id: str, snapshot_id: str) -> dict:
     store = require_snapshot_store()
     try:
@@ -463,6 +507,7 @@ def delete_snapshot(workspace_id: str, snapshot_id: str) -> dict:
     "/internal/workspaces/{workspace_id}",
     dependencies=[Depends(require_service_token)],
 )
+@serialize_workspace_operation
 def delete_workspace(workspace_id: str) -> dict:
     container_name, volume_name = names_for(workspace_id)
     try:
