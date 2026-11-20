@@ -110,6 +110,8 @@ The worker service is configured to restart unless explicitly stopped. Workspace
 
 The reconciliation loop does not access the API database, so database lifecycle status can remain stale after an abrupt host or daemon failure until the next API lifecycle request. Reconciliation is a safety controller, not a complete control-plane state synchronizer.
 
+The worker serializes lifecycle, snapshot, deletion, and reconciliation operations with an in-process lock per workspace. The Compose worker runs one Uvicorn process. Do not scale the worker to multiple processes or replicas until these locks are replaced with a shared distributed lock.
+
 Optional integration tests:
 
 ```bash
