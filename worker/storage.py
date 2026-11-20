@@ -212,6 +212,41 @@ class XFSWorkspaceStorage:
         )
         return directory
 
+    def prepare_project_directory(
+        self, workspace_id: str, directory: Path, project_id: int
+    ) -> None:
+        _, _ = self._workspace_path(workspace_id)
+        if directory.parent.resolve() != self.root.resolve():
+            raise WorkspaceStorageError(
+                "Staging directory must be a direct child of the storage root."
+            )
+        if directory.is_symlink() or directory.exists():
+            raise WorkspaceStorageError("Staging directory already exists or is unsafe.")
+        if project_id != self._project_id(workspace_id):
+            raise WorkspaceStorageError("Staging project ID does not match the workspace.")
+        directory.mkdir(mode=0o700)
+        try:
+            self.owner_setter(directory, 10001, 10001)
+            directory.chmod(0o700)
+        except OSError as exc:
+            raise WorkspaceStorageError(
+                "Unable to secure the restore staging directory."
+            ) from exc
+        self._run(
+            "xfs_quota",
+            "-x",
+            "-c",
+            f"project -s -p {directory} {project_id}",
+            str(self.root),
+        )
+        self._run(
+            "xfs_quota",
+            "-x",
+            "-c",
+            f"limit -p bhard={self.quota_limit} ihard={self.inode_limit} {project_id}",
+            str(self.root),
+        )
+
     def delete_workspace(self, workspace_id: str) -> None:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
