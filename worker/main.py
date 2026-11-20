@@ -139,7 +139,10 @@ def reconcile_managed_containers() -> int:
             _stop_unsafe_container(container, f"workspace storage validation failed: {exc}")
             stopped += 1
     if stopped:
-        logger.warning("Workspace reconciliation stopped unsafe containers", extra={"count": stopped})
+        logger.warning(
+            "Workspace reconciliation stopped unsafe containers",
+            extra={"count": stopped},
+        )
     return stopped
 
 
