@@ -23,7 +23,7 @@ class FakeExecutor:
         return {
             "workspace_id": workspace_id,
             "container_id": "container-test-id" if state != "deleted" else None,
-            "volume_name": "devbox-vol-test",
+            "storage_ref": "xfs-test",
             "state": state,
         }
 
@@ -52,7 +52,7 @@ def test_workspace_lifecycle_transitions(client, monkeypatch):
     assert started.status_code == 200
     assert started.json()["status"] == "running"
     assert started.json()["executor_id"] == "container-test-id"
-    assert started.json()["volume_name"] == "devbox-vol-test"
+    assert started.json()["storage_ref"] == "xfs-test"
 
     paused = client.post(f"/api/v1/workspaces/{workspace_id}/pause")
     assert paused.status_code == 200
