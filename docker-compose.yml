@@ -24,8 +24,13 @@ services:
       DEVBOX_WORKSPACE_CPU: ${WORKSPACE_CPU_LIMIT:-1.0}
       DEVBOX_WORKSPACE_MEMORY: ${WORKSPACE_MEMORY_LIMIT:-1g}
       DEVBOX_WORKSPACE_PIDS: ${WORKSPACE_PIDS_LIMIT:-256}
+      DEVBOX_WORKSPACE_STORAGE_ROOT: ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
+      DEVBOX_WORKSPACE_DISK_QUOTA: ${WORKSPACE_DISK_QUOTA:-10g}
+    cap_add:
+      - SYS_ADMIN
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
       interval: 5s
