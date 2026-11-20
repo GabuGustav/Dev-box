@@ -36,4 +36,4 @@ class SnapshotRead(BaseModel):
     workspace_id: str
     created_at: datetime
     size_bytes: int = Field(ge=0)
-    sha256: str = Field(min_length=64, max_length=64)
+    sha256: str = Field(min_length=64, max_length=64, pattern="^[0-9a-f]{64}$")
