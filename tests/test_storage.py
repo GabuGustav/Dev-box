@@ -20,7 +20,7 @@ class FakeRunner:
         self.calls.append((args, kwargs))
         if args[0] == "findmnt":
             output = self.filesystem
-        elif args[0] == "xfs_quota" and args[4] == "state -p":
+        elif args[0] == "xfs_quota" and args[3] == "state -p":
             output = self.state
         else:
             output = ""
@@ -29,7 +29,7 @@ class FakeRunner:
 
 def make_storage(tmp_path: Path, runner: FakeRunner) -> XFSWorkspaceStorage:
     root = tmp_path / "xfs-workspaces"
-    root.mkdir()
+    root.mkdir(parents=True)
     return XFSWorkspaceStorage(str(root), "10g", runner=runner)
 
 
