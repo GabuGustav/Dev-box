@@ -161,7 +161,6 @@ def test_snapshot_creation_rejects_symlinks_that_escape_workspace(tmp_path):
         store.create(WORKSPACE_ID, workspace)
 
 
-
 def test_interrupted_restore_recovers_previous_workspace_tree(tmp_path):
     store, workspace_storage = make_store(tmp_path)
     _, workspace = workspace_storage._workspace_path(WORKSPACE_ID)
