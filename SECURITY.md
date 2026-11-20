@@ -91,11 +91,15 @@ Apply DNS and IP-level controls to reduce DNS rebinding and SSRF risks. Network 
 ## 9. Persistence, snapshots, and deletion
 
 - Encrypt data in transit and at rest.
-- Restrict snapshots and backups to authorized operators and services.
-- Ensure snapshots do not contain unredacted temporary credentials.
+- Restrict snapshots and backups to authorized workspace owners and trusted services.
+- Encrypt snapshot archives with authenticated encryption (AES-256-GCM) and store them on a separate quota-limited filesystem.
+- Keep the snapshot encryption key outside the snapshot filesystem and back it up securely; key loss makes existing snapshots unrecoverable.
+- Treat snapshot contents as sensitive: archives include workspace files as-is, including credentials accidentally written into the workspace. Encryption protects data at rest but does not remove secrets from the archive.
+- Validate archive paths and symbolic links before restore; reject traversal and unsupported filesystem objects.
 - Define retention and deletion behaviour for workspace data, logs, artifacts, and backups.
 - Deletion should revoke credentials and grants, terminate executors, and schedule durable data removal according to the published retention policy.
 - Test restore procedures and access controls.
+- Delete a workspace's snapshots when its workspace data is permanently deleted, subject to the documented retention policy.
 
 ## 10. Audit and incident response
 
