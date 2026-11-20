@@ -236,3 +236,14 @@ def test_registry_schema_upgrades_older_project_table(tmp_path):
         assert "initialized" in columns
     finally:
         connection.close()
+
+
+
+def test_fresh_xfs_lost_found_directory_does_not_block_provisioning(tmp_path):
+    runner = FakeRunner()
+    storage = make_storage(tmp_path, runner)
+    (storage.root / "lost+found").mkdir()
+
+    directory = storage.ensure_workspace(WORKSPACE_ID)
+
+    assert directory.is_dir()
