@@ -93,6 +93,14 @@ def test_git_helper_uses_network_none_for_local_operations(monkeypatch, tmp_path
     assert fake.containers.kwargs["user"] == "10001:10001"
     assert fake.containers.kwargs["cap_drop"] == ["ALL"]
     assert fake.containers.kwargs["read_only"] is True
+    assert fake.containers.kwargs["labels"]["devbox.git_helper"] == "true"
+    assert "devbox.managed" not in fake.containers.kwargs["labels"]
+    assert fake.containers.kwargs["command"][:4] == [
+        "timeout",
+        "--signal=TERM",
+        f"{executor.GIT_OPERATION_TIMEOUT_SECONDS}s",
+        "git",
+    ]
     assert fake.containers.kwargs["volumes"] == {
         str(tmp_path): {"bind": "/workspace", "mode": "rw"}
     }
@@ -209,3 +217,39 @@ def test_git_commit_rejects_path_traversal(monkeypatch, tmp_path):
         )
 
     assert error.value.status_code == 422
+
+
+def test_reconciler_removes_exited_git_helpers_but_keeps_running_helpers(monkeypatch):
+    class Helper:
+        def __init__(self, status):
+            self.status = status
+            self.removed = False
+
+        def reload(self):
+            return None
+
+        def remove(self, force):
+            self.removed = True
+
+    class Containers:
+        def __init__(self, items):
+            self.items = items
+
+        def list(self, **kwargs):
+            assert kwargs == {
+                "all": True,
+                "filters": {"label": "devbox.git_helper=true"},
+            }
+            return self.items
+
+    exited = Helper("exited")
+    running = Helper("running")
+    monkeypatch.setattr(
+        executor, "docker_client", type("Docker", (), {"containers": Containers([exited, running])})()
+    )
+
+    removed = executor.reconcile_orphaned_git_helpers()
+
+    assert removed == 1
+    assert exited.removed is True
+    assert running.removed is False
