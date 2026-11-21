@@ -174,6 +174,9 @@ def run_git_command(
         container = docker_client.containers.create(
             image=IMAGE_NAME,
             command=[
+                "timeout",
+                "--signal=TERM",
+                f"{GIT_OPERATION_TIMEOUT_SECONDS}s",
                 "git",
                 "--literal-pathspecs",
                 "-c",
@@ -202,7 +205,6 @@ def run_git_command(
             },
             init=True,
             labels={
-                "devbox.managed": "true",
                 "devbox.git_helper": "true",
                 "devbox.workspace_id": workspace_id,
             },
@@ -399,10 +401,39 @@ def reconcile_managed_containers() -> int:
     return stopped
 
 
+
+def reconcile_orphaned_git_helpers() -> int:
+    """Remove completed one-shot Git helpers left behind after interrupted requests."""
+    try:
+        helpers = docker_client.containers.list(
+            all=True, filters={"label": "devbox.git_helper=true"}
+        )
+    except APIError:
+        logger.exception("Unable to enumerate temporary Git helper containers")
+        return 0
+
+    removed = 0
+    for helper in helpers:
+        try:
+            helper.reload()
+            if helper.status in {"exited", "dead"}:
+                helper.remove(force=True)
+                removed += 1
+        except NotFound:
+            continue
+        except DockerException:
+            logger.exception(
+                "Unable to clean up completed Git helper",
+                extra={"container_id": getattr(helper, "id", None)},
+            )
+    return removed
+
+
 async def reconciliation_loop() -> None:
     while True:
         try:
             await asyncio.to_thread(reconcile_managed_containers)
+            await asyncio.to_thread(reconcile_orphaned_git_helpers)
         except Exception:
             logger.exception("Workspace reconciliation loop failed")
         await asyncio.sleep(max(5, RECONCILE_INTERVAL_SECONDS))
