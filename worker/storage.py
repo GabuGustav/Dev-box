@@ -6,7 +6,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import HTTPException
 
@@ -43,12 +43,15 @@ class XFSWorkspaceStorage:
         runner=subprocess.run,
         owner_setter=_set_owner,
     ) -> None:
-        if not Path(root).is_absolute():
+        # Storage is provisioned on Linux, but importing/configuring the worker on
+        # Windows must still accept its POSIX deployment paths. Also accept native
+        # absolute paths so unit tests can use temporary directories on either OS.
+        if not (Path(root).is_absolute() or PurePosixPath(root).is_absolute()):
             raise WorkspaceStorageError("Workspace storage root must be an absolute path.")
         if not QUOTA_PATTERN.fullmatch(quota_limit):
             raise WorkspaceStorageError("Workspace disk quota must be a positive size such as 10g.")
         self.root = Path(root)
-        if not re.fullmatch(r"[A-Za-z0-9_./-]+", str(self.root)):
+        if not re.fullmatch(r"[A-Za-z0-9_./:\\\\-]+", str(self.root)):
             raise WorkspaceStorageError(
                 "Workspace storage root contains unsafe command characters."
             )
