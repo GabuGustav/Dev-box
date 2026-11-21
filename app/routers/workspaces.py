@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.executor_client import ExecutorClient, ExecutorRejected, ExecutorUnavailable
-from app.models import AuditEvent, Principal, Workspace
+from app.models import AuditEvent, Principal, Repository, Workspace
 from app.repositories import get_or_create_repository, normalize_repository_url
 from app.schemas import SnapshotRead, WorkspaceCreate, WorkspaceRead
 from app.security import get_current_principal
@@ -144,6 +144,30 @@ def list_workspaces(
         select(Workspace)
         .where(Workspace.owner_id == principal.id)
         .order_by(Workspace.created_at.desc())
+    ).all()
+    return [serialize_workspace(row) for row in rows]
+
+
+@router.get("/discover", response_model=list[WorkspaceRead])
+def discover_workspaces(
+    repository_url: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> list[WorkspaceRead]:
+    """Find only the caller's workspaces for a normalized repository URL."""
+    try:
+        normalized_url = normalize_repository_url(repository_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    rows = db.scalars(
+        select(Workspace)
+        .join(Repository, Workspace.repository_id == Repository.id)
+        .where(
+            Workspace.owner_id == principal.id,
+            Repository.normalized_url == normalized_url,
+        )
+        .order_by(Workspace.updated_at.desc())
     ).all()
     return [serialize_workspace(row) for row in rows]
 
