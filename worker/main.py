@@ -558,3 +558,61 @@ def delete_workspace(workspace_id: str) -> dict:
         "storage_ref": volume_name,
         "state": "deleted",
     }
+
+
+
+@app.get(
+    "/internal/workspaces/{workspace_id}/status",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def get_workspace_status(workspace_id: str) -> dict:
+    """Return the executor's authoritative state after validating its storage binding."""
+    container_name, storage_name = names_for(workspace_id)
+    try:
+        snapshot_store.recover_restore(workspace_id)
+        workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    except (WorkspaceStorageError, SnapshotError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        container = docker_client.containers.get(container_name)
+        container.reload()
+    except NotFound:
+        return {
+            "workspace_id": workspace_id,
+            "container_id": None,
+            "storage_ref": storage_name,
+            "state": "absent",
+        }
+
+    labels = container.attrs.get("Config", {}).get("Labels") or {}
+    mounts = container.attrs.get("Mounts", [])
+    workspace_mount = next(
+        (mount for mount in mounts if mount.get("Destination") == "/workspace"),
+        None,
+    )
+    if (
+        labels.get("devbox.managed") != "true"
+        or labels.get("devbox.workspace_id") != workspace_id
+        or container.name != container_name
+        or workspace_mount is None
+        or workspace_mount.get("Source") != str(workspace_path)
+    ):
+        _stop_unsafe_container(container, "workspace identity or storage binding failed validation")
+        return {
+            "workspace_id": workspace_id,
+            "container_id": None,
+            "storage_ref": storage_name,
+            "state": "failed",
+        }
+
+    state = container.status
+    if state not in {"created", "running", "paused", "restarting", "exited", "dead"}:
+        state = "failed"
+    return {
+        "workspace_id": workspace_id,
+        "container_id": container.id,
+        "storage_ref": storage_name,
+        "state": state,
+    }
