@@ -6,7 +6,6 @@ import pytest
 
 from worker.storage import XFSWorkspaceStorage
 
-
 XFS_TEST_ROOT = os.getenv("DEVBOX_TEST_XFS_ROOT")
 pytestmark = pytest.mark.skipif(
     not XFS_TEST_ROOT,

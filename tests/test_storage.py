@@ -7,7 +7,6 @@ from fastapi import HTTPException
 
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
-
 WORKSPACE_ID = "dbx_abcdefghijklmnopqrstuv"
 
 

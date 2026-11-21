@@ -10,7 +10,6 @@ import pytest
 from worker.snapshots import SnapshotError, SnapshotStore
 from worker.storage import XFSWorkspaceStorage
 
-
 WORKSPACE_ID = "dbx_abcdefghijklmnopqrstuv"
 
 

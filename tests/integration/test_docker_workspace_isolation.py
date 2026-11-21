@@ -6,7 +6,6 @@ import pytest
 
 from worker.storage import XFSWorkspaceStorage
 
-
 XFS_TEST_ROOT = os.getenv("DEVBOX_TEST_XFS_ROOT")
 DOCKER_INTEGRATION = os.getenv("DEVBOX_RUN_DOCKER_INTEGRATION") == "1"
 IMAGE = os.getenv("DEVBOX_TEST_WORKSPACE_IMAGE", "python:3.12-slim")

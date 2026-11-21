@@ -6,7 +6,6 @@ import pytest
 from worker.snapshots import SnapshotStore
 from worker.storage import XFSWorkspaceStorage
 
-
 WORKSPACE_ROOT = os.getenv("DEVBOX_TEST_XFS_ROOT")
 SNAPSHOT_ROOT = os.getenv("DEVBOX_TEST_SNAPSHOT_XFS_ROOT")
 ENCRYPTION_KEY = os.getenv("DEVBOX_TEST_SNAPSHOT_ENCRYPTION_KEY")

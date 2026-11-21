@@ -238,7 +238,7 @@ class SnapshotStore:
             os.close(descriptor)
 
     def _aad(self, workspace_id: str, snapshot_id: str) -> bytes:
-        return f"devbox:{workspace_id}:{snapshot_id}".encode("utf-8")
+        return f"devbox:{workspace_id}:{snapshot_id}".encode()
 
     @staticmethod
     def _safe_member(member: tarfile.TarInfo) -> str:
