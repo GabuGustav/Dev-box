@@ -732,6 +732,65 @@ def delete_workspace(workspace_id: str) -> dict:
 
 
 
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/git/clone",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def clone_workspace_repository(workspace_id: str, payload: GitCloneRequest) -> dict:
+    repository_url = validate_git_repository_url(payload.repository_url)
+    branch = validate_git_branch(payload.branch)
+    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    if any(workspace_path.iterdir()):
+        raise HTTPException(
+            status_code=409,
+            detail="Workspace directory is not empty; refusing to overwrite existing files.",
+        )
+    run_git_command(workspace_id, ["check-ref-format", "--branch", branch])
+    output = run_git_command(
+        workspace_id,
+        ["clone", "--depth", "1", "--single-branch", "--branch", branch,
+         "--", repository_url, "/workspace"],
+        network_enabled=True,
+    )
+    return {
+        "workspace_id": workspace_id,
+        "operation": "clone",
+        "repository_url": repository_url,
+        "branch": branch,
+        "output": output,
+    }
+
+
+@app.get(
+    "/internal/workspaces/{workspace_id}/git/status",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def git_status(workspace_id: str) -> dict:
+    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    if not (workspace_path / ".git").exists():
+        raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
+    output = run_git_command(workspace_id, ["status", "--short", "--branch"])
+    return {"workspace_id": workspace_id, "operation": "status", "output": output}
+
+
+@app.get(
+    "/internal/workspaces/{workspace_id}/git/diff",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def git_diff(workspace_id: str) -> dict:
+    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    if not (workspace_path / ".git").exists():
+        raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
+    output = run_git_command(
+        workspace_id, ["diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color"]
+    )
+    return {"workspace_id": workspace_id, "operation": "diff", "output": output}
+
+
 @app.get(
     "/internal/workspaces/{workspace_id}/status",
     dependencies=[Depends(require_service_token)],
