@@ -30,5 +30,6 @@ def test_egress_proxy_blocks_private_and_unapproved_destinations():
     assert lines.index("http_access deny to_local") < lines.index(
         "http_access allow allowed_domains"
     )
-    assert lines[-1] == "http_access deny all"
+    access_rules = [line for line in lines if line.startswith("http_access ")]
+    assert access_rules[-1] == "http_access deny all"
     assert "http_access allow all" not in lines
