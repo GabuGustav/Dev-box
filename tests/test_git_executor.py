@@ -173,3 +173,39 @@ def test_clone_refuses_nonempty_workspace_and_uses_proxy_for_clone(monkeypatch, 
             ),
         )
     assert error.value.status_code == 409
+
+
+def test_git_commit_only_stages_explicit_paths(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    calls = []
+    monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
+    monkeypatch.setattr(
+        executor,
+        "run_git_command",
+        lambda workspace_id, arguments, network_enabled=False: (
+            calls.append(arguments) or ("a" * 40 if arguments == ["rev-parse", "HEAD"] else "ok")
+        ),
+    )
+
+    executor.git_commit(
+        "dbx_abcdefghijklmnopqrstuv",
+        executor.GitCommitRequest(message="Commit staged work"),
+    )
+
+    assert len(calls) == 2
+    assert calls[0][0:2] == ["-c", "user.name=DevBox Agent"]
+    assert "add" not in calls[0]
+    assert calls[1][-2:] == ["-m", "Commit staged work"]
+
+
+def test_git_commit_rejects_path_traversal(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
+
+    with pytest.raises(HTTPException) as error:
+        executor.git_commit(
+            "dbx_abcdefghijklmnopqrstuv",
+            executor.GitCommitRequest(message="Unsafe commit", paths=["../secrets.txt"]),
+        )
+
+    assert error.value.status_code == 422
