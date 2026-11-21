@@ -54,3 +54,56 @@ def test_rejects_repository_credentials(client):
         },
     )
     assert response.status_code == 422
+
+
+def test_repository_discovery_is_scoped_to_authenticated_principal(client):
+    repository_url = "https://github.com/example/shared-project"
+    first = client.post(
+        "/api/v1/workspaces",
+        json={"name": "Agent one's workspace", "repository_url": repository_url},
+    ).json()
+    second = client.post(
+        "/api/v1/workspaces",
+        headers=auth_headers("test-key-two"),
+        json={"name": "Agent two's workspace", "repository_url": repository_url},
+    ).json()
+
+    first_results = client.get(
+        "/api/v1/workspaces/discover", params={"repository_url": repository_url}
+    )
+    second_results = client.get(
+        "/api/v1/workspaces/discover",
+        params={"repository_url": repository_url},
+        headers=auth_headers("test-key-two"),
+    )
+
+    assert first_results.status_code == 200
+    assert [item["id"] for item in first_results.json()] == [first["id"]]
+    assert second_results.status_code == 200
+    assert [item["id"] for item in second_results.json()] == [second["id"]]
+
+
+def test_repository_discovery_normalizes_git_suffix(client):
+    created = client.post(
+        "/api/v1/workspaces",
+        json={
+            "name": "Normalized lookup",
+            "repository_url": "https://github.com/example/project.git",
+        },
+    ).json()
+
+    response = client.get(
+        "/api/v1/workspaces/discover",
+        params={"repository_url": "https://github.com/example/project"},
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [created["id"]]
+
+
+def test_repository_discovery_rejects_invalid_url(client):
+    response = client.get(
+        "/api/v1/workspaces/discover", params={"repository_url": "not-a-repository"}
+    )
+
+    assert response.status_code == 422
