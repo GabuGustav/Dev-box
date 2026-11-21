@@ -43,3 +43,4 @@ class GitBranchCreate(BaseModel):
 
 class GitCommitCreate(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
+    paths: list[str] = Field(default_factory=list, max_length=100)
