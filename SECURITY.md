@@ -68,6 +68,8 @@ Default to restricted egress. Allow only the network access needed for configure
 
 Apply DNS and IP-level controls to reduce DNS rebinding and SSRF risks. Network allowlists must be configurable per workload class.
 
+The initial controlled-egress foundation uses a dedicated internal-only Docker network for outbound helper containers. A private Squid proxy is the only service attached to both that internal network and the external bridge; it is not published on a host port. The proxy allows only approved Git hosting and package domains, denies private, loopback, link-local, and other local destinations, and denies all unlisted domains. Ordinary workspace containers remain on `network_mode=none`; only explicitly managed helper containers should join the restricted egress network. This proxy foundation does not yet mean repository cloning or arbitrary workspace internet access is enabled.
+
 ## 7. Secrets and credentials
 
 - Store provider tokens in an encrypted credential store or secret manager.
