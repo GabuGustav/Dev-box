@@ -36,3 +36,10 @@ class SnapshotRead(BaseModel):
     created_at: datetime
     size_bytes: int = Field(ge=0)
     sha256: str = Field(min_length=64, max_length=64, pattern="^[0-9a-f]{64}$")
+
+class GitBranchCreate(BaseModel):
+    branch: str = Field(min_length=1, max_length=255)
+
+
+class GitCommitCreate(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
