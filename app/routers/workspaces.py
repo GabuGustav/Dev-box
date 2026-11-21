@@ -9,7 +9,13 @@ from app.database import get_db
 from app.executor_client import ExecutorClient, ExecutorRejected, ExecutorUnavailable
 from app.models import AuditEvent, Principal, Repository, Workspace
 from app.repositories import get_or_create_repository, normalize_repository_url
-from app.schemas import SnapshotRead, WorkspaceCreate, WorkspaceRead
+from app.schemas import (
+    GitBranchCreate,
+    GitCommitCreate,
+    SnapshotRead,
+    WorkspaceCreate,
+    WorkspaceRead,
+)
 from app.security import get_current_principal
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -170,6 +176,149 @@ def discover_workspaces(
         .order_by(Workspace.updated_at.desc())
     ).all()
     return [serialize_workspace(row) for row in rows]
+
+
+
+def execute_git(action: str, workspace: Workspace, *args: str) -> dict:
+    try:
+        return getattr(executor_client, f"git_{action}")(workspace.id, *args)
+    except ExecutorRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except ExecutorUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def record_git_event(
+    db: Session,
+    request: Request,
+    principal: Principal,
+    workspace: Workspace,
+    action: str,
+    details: dict,
+) -> None:
+    db.add(
+        AuditEvent(
+            actor_id=principal.id,
+            action=f"workspace.git.{action}",
+            target_type="workspace",
+            target_id=workspace.id,
+            request_id=getattr(request.state, "request_id", None),
+            details=details,
+        )
+    )
+    db.commit()
+
+
+@router.post("/{workspace_id}/clone")
+def clone_repository(
+    workspace_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Deleted workspaces cannot be cloned.")
+    result = execute_git(
+        "clone", workspace, workspace.repository.normalized_url, workspace.branch
+    )
+    record_git_event(
+        db,
+        request,
+        principal,
+        workspace,
+        "cloned",
+        {"repository_url": workspace.repository.normalized_url, "branch": workspace.branch},
+    )
+    return result
+
+
+@router.get("/{workspace_id}/git/status")
+def get_git_status(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Workspace is deleted.")
+    return execute_git("status", workspace)
+
+
+@router.get("/{workspace_id}/git/diff")
+def get_git_diff(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Workspace is deleted.")
+    return execute_git("diff", workspace)
+
+
+@router.post("/{workspace_id}/git/branches")
+def create_git_branch(
+    workspace_id: str,
+    payload: GitBranchCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Workspace is deleted.")
+    result = execute_git("create_branch", workspace, payload.branch)
+    workspace.branch = payload.branch
+    record_git_event(
+        db, request, principal, workspace, "branch.created", {"branch": payload.branch}
+    )
+    return result
+
+
+@router.post("/{workspace_id}/git/commit")
+def create_git_commit(
+    workspace_id: str,
+    payload: GitCommitCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Workspace is deleted.")
+    result = execute_git("commit", workspace, payload.message)
+    record_git_event(
+        db,
+        request,
+        principal,
+        workspace,
+        "committed",
+        {"commit": result.get("commit"), "branch": workspace.branch},
+    )
+    return result
+
+
+@router.post("/{workspace_id}/git/fetch")
+def fetch_git_changes(
+    workspace_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> dict:
+    workspace = owned_workspace(db, principal, workspace_id)
+    if workspace.status == "deleted":
+        raise HTTPException(status_code=409, detail="Workspace is deleted.")
+    result = execute_git("fetch", workspace, workspace.repository.normalized_url)
+    record_git_event(
+        db,
+        request,
+        principal,
+        workspace,
+        "fetched",
+        {"repository_url": workspace.repository.normalized_url},
+    )
+    return result
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceRead)
