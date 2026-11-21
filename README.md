@@ -79,7 +79,13 @@ All workspace endpoints require the `X-DevBox-Key` header.
 | GET | `/api/v1/workspaces` | List the authenticated principal's workspaces |
 | GET | `/api/v1/workspaces/discover?repository_url=...` | Find only the authenticated principal's workspaces for a normalized repository URL |
 | GET | `/api/v1/workspaces/{workspace_id}` | Retrieve an owned workspace |
-| POST | `/api/v1/workspaces/{workspace_id}/clone` | Clone its registered public repository and selected branch through the restricted proxy |\n| GET | `/api/v1/workspaces/{workspace_id}/git/status` | Read branch and working-tree status |\n| GET | `/api/v1/workspaces/{workspace_id}/git/diff` | Read staged and unstaged changes |\n| POST | `/api/v1/workspaces/{workspace_id}/git/branches` | Create and select a branch |\n| POST | `/api/v1/workspaces/{workspace_id}/git/commit` | Commit already staged files, optionally staging explicit relative paths |\n| POST | `/api/v1/workspaces/{workspace_id}/git/fetch` | Fetch remote updates without merging |\n| POST | `/api/v1/workspaces/{workspace_id}/start` | Create/start its isolated container and enforce its disk quota |
+| POST | `/api/v1/workspaces/{workspace_id}/clone` | Clone its registered public repository and selected branch through the restricted proxy |
+| GET | `/api/v1/workspaces/{workspace_id}/git/status` | Read branch and working-tree status |
+| GET | `/api/v1/workspaces/{workspace_id}/git/diff` | Read staged and unstaged changes |
+| POST | `/api/v1/workspaces/{workspace_id}/git/branches` | Create and select a branch |
+| POST | `/api/v1/workspaces/{workspace_id}/git/commit` | Commit already staged files, optionally staging explicit relative paths |
+| POST | `/api/v1/workspaces/{workspace_id}/git/fetch` | Fetch remote updates without merging |
+| POST | `/api/v1/workspaces/{workspace_id}/start` | Create/start its isolated container and enforce its disk quota |
 | POST | `/api/v1/workspaces/{workspace_id}/stop` | Stop its container, retaining its workspace data |
 | POST | `/api/v1/workspaces/{workspace_id}/pause` | Pause a running container |
 | POST | `/api/v1/workspaces/{workspace_id}/resume` | Resume a paused/stopped container |
@@ -126,10 +132,22 @@ pytest
 
 The API tests mock the executor service, and executor unit tests mock Docker SDK resources; neither requires a running Docker daemon. Kernel quota tests require `DEVBOX_TEST_XFS_ROOT` to point at an empty dedicated XFS test mount. Docker persistence tests additionally require `DEVBOX_RUN_DOCKER_INTEGRATION=1` and a Linux Docker host.
 
+## Git workflow
+
+After creating a workspace, call `POST /api/v1/workspaces/{workspace_id}/clone` to clone the repository and branch registered on that workspace. Then use the Git status, diff, branch, commit, and fetch endpoints listed above. Clone is safe to retry when the same repository and branch are already present. Fetch updates remote-tracking references only; it does not merge or rebase.
+
+Commit accepts a JSON body such as:
+
+```json
+{"message": "Implement workspace feature", "paths": ["src/file.py"]}
+```
+
+Omit `paths` to commit only files already staged inside the workspace. Private-repository authentication and push are not available yet; they require a short-lived credential broker.
+
 ## Repository discovery
 
 Use `GET /api/v1/workspaces/discover?repository_url=https://github.com/owner/repository` to reconnect to existing workspaces after a new chat or client session. The endpoint normalizes the repository URL and returns only workspaces owned by the authenticated principal; matching a repository never grants access to another agent's workspace.
 
 ## Next
 
-Run the opt-in Docker/XFS integration tests on a dedicated Linux host, then complete backup/restore drills and adversarial isolation testing before considering Phase 2 complete. Phase 3 continues with repository cloning, controlled egress, and Git operations.
+Next: implement a short-lived credential broker for private repositories and Git push, then add merge/conflict handling and PR workflows. Phase 2 still requires real Docker/XFS integration runs, backup/restore drills, and adversarial isolation testing on a dedicated Linux host.
