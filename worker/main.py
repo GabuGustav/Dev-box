@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
 
 import docker
-from docker.errors import APIError, ImageNotFound, NotFound
+from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 
 from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
@@ -48,7 +48,19 @@ snapshot_store = SnapshotStore(
     max_snapshots=SNAPSHOT_MAX_COUNT,
     max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
 )
-docker_client = docker.from_env()
+class LazyDockerClient:
+    """Connect to Docker only when an operation actually needs the daemon."""
+
+    def __init__(self) -> None:
+        self._client = None
+
+    def __getattr__(self, name):
+        if self._client is None:
+            self._client = docker.from_env()
+        return getattr(self._client, name)
+
+
+docker_client = LazyDockerClient()
 
 
 def require_snapshot_store() -> SnapshotStore:
@@ -213,7 +225,7 @@ app = FastAPI(title="DevBox Executor", version="0.1.0", lifespan=lifespan)
 def health() -> dict[str, str]:
     try:
         docker_client.ping()
-    except APIError as exc:
+    except DockerException as exc:
         raise HTTPException(status_code=503, detail="Docker daemon unavailable.") from exc
     return {"status": "ready"}
 
