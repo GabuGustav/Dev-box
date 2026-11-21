@@ -97,15 +97,20 @@ class ExecutorClient:
         )
 
     def git_status(self, workspace_id: str) -> dict:
-        return self._request("GET", f"/internal/workspaces/{workspace_id}/git/status")
+        return self._request(
+            "GET", f"/internal/workspaces/{workspace_id}/git/status", timeout=600.0
+        )
 
     def git_diff(self, workspace_id: str) -> dict:
-        return self._request("GET", f"/internal/workspaces/{workspace_id}/git/diff")
+        return self._request(
+            "GET", f"/internal/workspaces/{workspace_id}/git/diff", timeout=600.0
+        )
 
     def git_create_branch(self, workspace_id: str, branch: str) -> dict:
         return self._request(
             "POST",
             f"/internal/workspaces/{workspace_id}/git/branches",
+            timeout=600.0,
             json_body={"branch": branch},
         )
 
@@ -115,6 +120,7 @@ class ExecutorClient:
         return self._request(
             "POST",
             f"/internal/workspaces/{workspace_id}/git/commit",
+            timeout=600.0,
             json_body={"message": message, "paths": paths or []},
         )
 
