@@ -9,12 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.logging_config import configure_logging
 from app.lifecycle import reconcile_once
+from app.logging_config import configure_logging
 from app.routers import health, workspaces
 
 configure_logging(settings.log_level)
 logger = logging.getLogger("devbox.http")
+
 
 async def lifecycle_reconciliation_loop() -> None:
     interval = max(5, settings.lifecycle_reconcile_interval_seconds)
