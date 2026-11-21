@@ -5,6 +5,7 @@ RUN apk add --no-cache squid ca-certificates \
     && chown squid:squid /tmp/squid
 
 COPY egress-proxy/squid.conf /etc/squid/squid.conf
+RUN squid -k parse -f /etc/squid/squid.conf
 
 USER squid
 EXPOSE 3128
