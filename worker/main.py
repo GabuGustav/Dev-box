@@ -176,6 +176,7 @@ def run_git_command(
             command=[
                 "timeout",
                 "--signal=TERM",
+                "--kill-after=5s",
                 f"{GIT_OPERATION_TIMEOUT_SECONDS}s",
                 "git",
                 "--literal-pathspecs",
