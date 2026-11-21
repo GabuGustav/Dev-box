@@ -161,8 +161,8 @@ class XFSWorkspaceStorage:
                 return (
                     int(existing[0]),
                     bool(existing[2]),
-                    int(existing[3]) if existing[3] is not None else None,
-                    int(existing[4]) if existing[4] is not None else None,
+                    self._decode_identity(existing[3]),
+                    self._decode_identity(existing[4]),
                 )
             collision = connection.execute(
                 "SELECT workspace_id FROM workspace_projects WHERE project_id = ?",
@@ -185,6 +185,21 @@ class XFSWorkspaceStorage:
         finally:
             connection.close()
 
+    @staticmethod
+    def _encode_identity(value: int) -> str:
+        # Prefix hexadecimal values so SQLite INTEGER affinity cannot coerce
+        # large filesystem identifiers to imprecise floating-point REAL values.
+        return f"x{value:x}"
+
+    @staticmethod
+    def _decode_identity(value: int | str | None) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, str) and value.startswith("x"):
+            return int(value[1:], 16)
+        # Compatibility with registry rows written by older versions.
+        return int(value)
+
     def _set_initialized(self, workspace_id: str, directory: Path) -> None:
         stat = directory.stat(follow_symlinks=False)
         connection = self._connect()
@@ -192,7 +207,11 @@ class XFSWorkspaceStorage:
             cursor = connection.execute(
                 "UPDATE workspace_projects "
                 "SET initialized = 1, device = ?, inode = ? WHERE workspace_id = ?",
-                (str(stat.st_dev), str(stat.st_ino), workspace_id),
+                (
+                    self._encode_identity(stat.st_dev),
+                    self._encode_identity(stat.st_ino),
+                    workspace_id,
+                ),
             )
             if cursor.rowcount != 1:
                 raise WorkspaceStorageError("Workspace project registry entry is missing.")
@@ -242,8 +261,8 @@ class XFSWorkspaceStorage:
         directory_stat = directory.stat(follow_symlinks=False)
         if initialized and registered_device is not None and registered_inode is not None:
             if (directory_stat.st_dev, directory_stat.st_ino) != (
-                int(registered_device),
-                int(registered_inode),
+                registered_device,
+                registered_inode,
             ):
                 raise WorkspaceStorageError(
                     "Workspace directory identity changed; refusing to attach replaced data."
@@ -374,7 +393,8 @@ class XFSWorkspaceStorage:
                 directory_stat = directory.stat(follow_symlinks=False)
                 if row[2] is not None and row[3] is not None:
                     if (directory_stat.st_dev, directory_stat.st_ino) != (
-                        int(row[2]), int(row[3])
+                        self._decode_identity(row[2]),
+                        self._decode_identity(row[3]),
                     ):
                         raise WorkspaceStorageError(
                             "Workspace directory identity changed; refusing deletion."
