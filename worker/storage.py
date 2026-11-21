@@ -51,7 +51,7 @@ class XFSWorkspaceStorage:
         if not QUOTA_PATTERN.fullmatch(quota_limit):
             raise WorkspaceStorageError("Workspace disk quota must be a positive size such as 10g.")
         self.root = Path(root)
-        if not re.fullmatch(r"[A-Za-z0-9_./:\\\\-]+", str(self.root)):
+        if not all(char.isalnum() or char in "_./:\\\\-" for char in str(self.root)):
             raise WorkspaceStorageError(
                 "Workspace storage root contains unsafe command characters."
             )
