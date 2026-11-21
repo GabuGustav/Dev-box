@@ -74,6 +74,7 @@ class GitRepositoryRequest(BaseModel):
 
 class GitCommitRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
+    paths: list[str] = Field(default_factory=list, max_length=100)
 
 
 def validate_git_repository_url(raw_url: str) -> str:
@@ -162,6 +163,7 @@ def run_git_command(
             image=IMAGE_NAME,
             command=[
                 "git",
+                "--literal-pathspecs",
                 "-c",
                 "core.hooksPath=/dev/null",
                 "-c",
@@ -841,17 +843,18 @@ def git_commit(workspace_id: str, payload: GitCommitRequest) -> dict:
     workspace_path = workspace_storage.ensure_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
-    run_git_command(
-        workspace_id,
-        [
-            "-c",
-            "user.name=DevBox Agent",
-            "-c",
-            "user.email=devbox@localhost",
-            "add",
-            "--all",
-        ],
-    )
+    if payload.paths:
+        for path in payload.paths:
+            if (
+                not path
+                or path.startswith("/")
+                or path.startswith("-")
+                or "\\" in path
+                or any(part == ".." for part in path.split("/"))
+                or any(ord(char) < 32 for char in path)
+            ):
+                raise HTTPException(status_code=422, detail="Commit path is invalid.")
+        run_git_command(workspace_id, ["add", "--", *payload.paths])
     output = run_git_command(
         workspace_id,
         [
