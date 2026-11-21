@@ -280,3 +280,56 @@ def test_git_commit_stages_only_requested_relative_paths(monkeypatch, tmp_path):
 
     assert calls[0] == ["add", "--", "src/main.py"]
     assert calls[1][-2:] == ["-m", "Commit one file"]
+
+
+def test_clone_is_idempotent_for_same_repository_and_branch(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    calls = []
+    monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
+
+    def fake_run(workspace_id, arguments, network_enabled=False):
+        calls.append((arguments, network_enabled))
+        if arguments == ["remote", "get-url", "origin"]:
+            return "https://github.com/example/project"
+        if arguments == ["branch", "--show-current"]:
+            return "main"
+        raise AssertionError(f"Unexpected Git command: {arguments}")
+
+    monkeypatch.setattr(executor, "run_git_command", fake_run)
+
+    result = executor.clone_workspace_repository(
+        "dbx_abcdefghijklmnopqrstuv",
+        executor.GitCloneRequest(
+            repository_url="https://github.com/example/project",
+            branch="main",
+        ),
+    )
+
+    assert result["output"] == "Repository already cloned."
+    assert len(calls) == 2
+    assert all(network_enabled is False for _, network_enabled in calls)
+
+
+def test_git_fetch_resets_origin_to_registered_repository(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    calls = []
+    monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
+    monkeypatch.setattr(
+        executor,
+        "run_git_command",
+        lambda workspace_id, arguments, network_enabled=False: (
+            calls.append((arguments, network_enabled)) or "ok"
+        ),
+    )
+
+    executor.git_fetch(
+        "dbx_abcdefghijklmnopqrstuv",
+        executor.GitRepositoryRequest(
+            repository_url="https://github.com/example/project"
+        ),
+    )
+
+    assert calls == [
+        (["remote", "set-url", "origin", "https://github.com/example/project"], False),
+        (["fetch", "--prune", "origin"], True),
+    ]
