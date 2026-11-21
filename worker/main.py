@@ -64,6 +64,10 @@ class GitBranchRequest(BaseModel):
     branch: str = Field(min_length=1, max_length=255)
 
 
+class GitRepositoryRequest(BaseModel):
+    repository_url: str = Field(min_length=8, max_length=500)
+
+
 class GitCommitRequest(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
 
@@ -858,11 +862,11 @@ def git_commit(workspace_id: str, payload: GitCommitRequest) -> dict:
     dependencies=[Depends(require_service_token)],
 )
 @serialize_workspace_operation
-def git_fetch(workspace_id: str, repository_url: str) -> dict:
+def git_fetch(workspace_id: str, payload: GitRepositoryRequest) -> dict:
     workspace_path = workspace_storage.ensure_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
-    trusted_url = validate_git_repository_url(repository_url)
+    trusted_url = validate_git_repository_url(payload.repository_url)
     run_git_command(workspace_id, ["remote", "set-url", "origin", trusted_url])
     output = run_git_command(
         workspace_id, ["fetch", "--prune", "origin"], network_enabled=True
