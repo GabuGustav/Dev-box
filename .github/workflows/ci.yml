@@ -21,6 +21,8 @@ jobs:
         run: docker build --file egress-proxy.Dockerfile --tag devbox-egress-proxy:ci .
       - name: Build Git-enabled workspace image
         run: docker build --file workspace-image/Dockerfile --tag devbox-workspace:ci .
+      - name: Validate Docker Compose configuration
+        run: cp .env.example .env && docker compose config --quiet
       - name: Lint
         run: ruff check .
       - name: Test
