@@ -224,7 +224,14 @@ class SnapshotStore:
 
     @staticmethod
     def _fsync_directory(directory: Path) -> None:
-        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        directory_flag = getattr(os, "O_DIRECTORY", None)
+
+        # Windows does not support opening directories for fsync through os.open.
+        # File contents are flushed separately before the atomic replacement.
+        if directory_flag is None:
+            return
+
+        descriptor = os.open(directory, os.O_RDONLY | directory_flag)
         try:
             os.fsync(descriptor)
         finally:
