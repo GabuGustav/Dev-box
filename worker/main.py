@@ -835,7 +835,7 @@ def git_status(workspace_id: str) -> dict:
 )
 @serialize_workspace_operation
 def git_diff(workspace_id: str) -> dict:
-    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    workspace_path = ensure_git_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
     output = run_git_command(
@@ -851,7 +851,7 @@ def git_diff(workspace_id: str) -> dict:
 )
 @serialize_workspace_operation
 def git_create_branch(workspace_id: str, payload: GitBranchRequest) -> dict:
-    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    workspace_path = ensure_git_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
     branch = validate_git_branch(payload.branch)
@@ -871,7 +871,7 @@ def git_create_branch(workspace_id: str, payload: GitBranchRequest) -> dict:
 )
 @serialize_workspace_operation
 def git_commit(workspace_id: str, payload: GitCommitRequest) -> dict:
-    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    workspace_path = ensure_git_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
     if payload.paths:
@@ -913,7 +913,7 @@ def git_commit(workspace_id: str, payload: GitCommitRequest) -> dict:
 )
 @serialize_workspace_operation
 def git_fetch(workspace_id: str, payload: GitRepositoryRequest) -> dict:
-    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    workspace_path = ensure_git_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
     trusted_url = validate_git_repository_url(payload.repository_url)
