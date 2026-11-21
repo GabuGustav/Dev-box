@@ -18,7 +18,13 @@ class ExecutorClient:
         self.base_url = settings.executor_service_url.rstrip("/")
         self.token = settings.executor_service_token
 
-    def _request(self, method: str, path: str, timeout: float = 30.0) -> dict:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        timeout: float = 30.0,
+        json_body: dict | None = None,
+    ) -> dict:
         if not self.token:
             raise ExecutorUnavailable("Executor service authentication is not configured.")
         try:
@@ -28,6 +34,7 @@ class ExecutorClient:
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=timeout,
                 trust_env=False,
+                json=json_body,
             )
             if 400 <= response.status_code < 500:
                 try:
@@ -80,3 +87,39 @@ class ExecutorClient:
 
     def get_status(self, workspace_id: str) -> dict:
         return self._request("GET", f"/internal/workspaces/{workspace_id}/status")
+
+    def git_clone(self, workspace_id: str, repository_url: str, branch: str) -> dict:
+        return self._request(
+            "POST",
+            f"/internal/workspaces/{workspace_id}/git/clone",
+            timeout=600.0,
+            json_body={"repository_url": repository_url, "branch": branch},
+        )
+
+    def git_status(self, workspace_id: str) -> dict:
+        return self._request("GET", f"/internal/workspaces/{workspace_id}/git/status")
+
+    def git_diff(self, workspace_id: str) -> dict:
+        return self._request("GET", f"/internal/workspaces/{workspace_id}/git/diff")
+
+    def git_create_branch(self, workspace_id: str, branch: str) -> dict:
+        return self._request(
+            "POST",
+            f"/internal/workspaces/{workspace_id}/git/branches",
+            json_body={"branch": branch},
+        )
+
+    def git_commit(self, workspace_id: str, message: str) -> dict:
+        return self._request(
+            "POST",
+            f"/internal/workspaces/{workspace_id}/git/commit",
+            json_body={"message": message},
+        )
+
+    def git_fetch(self, workspace_id: str, repository_url: str) -> dict:
+        return self._request(
+            "POST",
+            f"/internal/workspaces/{workspace_id}/git/fetch",
+            timeout=600.0,
+            json_body={"repository_url": repository_url},
+        )
