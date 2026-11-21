@@ -5,19 +5,21 @@ import logging
 import os
 import re
 import threading
+from urllib.parse import urlsplit
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
 
 import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
+from pydantic import BaseModel, Field
 
 from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.executor")
 WORKSPACE_ID_PATTERN = re.compile(r"^dbx_[A-Za-z0-9_-]{20,40}$")
-IMAGE_NAME = os.getenv("DEVBOX_WORKSPACE_IMAGE", "devbox-workspace:0.1")
+IMAGE_NAME = os.getenv("DEVBOX_WORKSPACE_IMAGE", "devbox-workspace:0.2")
 WORKSPACE_CPU = float(os.getenv("DEVBOX_WORKSPACE_CPU", "1.0"))
 WORKSPACE_MEMORY = os.getenv("DEVBOX_WORKSPACE_MEMORY", "1g")
 WORKSPACE_PIDS = int(os.getenv("DEVBOX_WORKSPACE_PIDS", "256"))
@@ -35,6 +37,11 @@ SNAPSHOT_ENCRYPTION_KEY = os.getenv("DEVBOX_SNAPSHOT_ENCRYPTION_KEY", "")
 SNAPSHOT_MAX_COUNT = int(os.getenv("DEVBOX_SNAPSHOT_MAX_COUNT", "10"))
 SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3)))
 RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))
+GIT_EGRESS_NETWORK = os.getenv("DEVBOX_GIT_EGRESS_NETWORK", "devbox_egress_internal")
+GIT_PROXY_URL = os.getenv("DEVBOX_GIT_PROXY_URL", "http://egress-proxy:3128")
+GIT_OPERATION_TIMEOUT_SECONDS = max(10, min(600, int(os.getenv("DEVBOX_GIT_OPERATION_TIMEOUT_SECONDS", "300"))))
+GIT_OUTPUT_LIMIT_BYTES = 64 * 1024
+GIT_ALLOWED_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 workspace_storage = XFSWorkspaceStorage(
     WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA, WORKSPACE_INODE_LIMIT
 )
@@ -48,6 +55,170 @@ snapshot_store = SnapshotStore(
     max_snapshots=SNAPSHOT_MAX_COUNT,
     max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
 )
+class GitCloneRequest(BaseModel):
+    repository_url: str = Field(min_length=8, max_length=500)
+    branch: str = Field(min_length=1, max_length=255)
+
+
+class GitBranchRequest(BaseModel):
+    branch: str = Field(min_length=1, max_length=255)
+
+
+class GitCommitRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
+def validate_git_repository_url(raw_url: str) -> str:
+    parsed = urlsplit(raw_url.strip())
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in GIT_ALLOWED_HOSTS
+        or parsed.username
+        or parsed.password
+        or parsed.port is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Git operations currently support public HTTPS repositories on GitHub, GitLab, and Bitbucket.",
+        )
+    parts = [part for part in parsed.path.strip("/").split("/") if part]
+    if len(parts) != 2 or any(part in {".", ".."} for part in parts):
+        raise HTTPException(status_code=422, detail="Repository URL must identify an owner and repository.")
+    repository = parts[1][:-4] if parts[1].endswith(".git") else parts[1]
+    if not parts[0] or not repository:
+        raise HTTPException(status_code=422, detail="Repository URL is invalid.")
+    return f"https://{parsed.hostname.lower()}/{parts[0]}/{repository}"
+
+
+def validate_git_branch(branch: str) -> str:
+    invalid = (
+        not branch
+        or len(branch) > 255
+        or branch.startswith("-")
+        or branch.startswith("/")
+        or branch.endswith(("/", "."))
+        or "//" in branch
+        or ".." in branch
+        or "@{" in branch
+        or any(ord(char) < 32 or char in " ~^:?*[]\\" for char in branch)
+        or any(part.startswith(".") or part.endswith(".lock") for part in branch.split("/"))
+    )
+    if invalid:
+        raise HTTPException(status_code=422, detail="Git branch name is invalid.")
+    return branch
+
+
+def run_git_command(
+    workspace_id: str,
+    arguments: list[str],
+    *,
+    network_enabled: bool = False,
+) -> str:
+    try:
+        workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    except (WorkspaceStorageError, HTTPException) as exc:
+        raise HTTPException(status_code=503, detail="Workspace storage is unavailable.") from exc
+
+    environment = {
+        "HOME": "/tmp",
+        "TMPDIR": "/tmp",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_PAGER": "cat",
+        "LC_ALL": "C.UTF-8",
+    }
+    network_mode = "none"
+    if network_enabled:
+        network_mode = GIT_EGRESS_NETWORK
+        environment.update(
+            {
+                "HTTP_PROXY": GIT_PROXY_URL,
+                "HTTPS_PROXY": GIT_PROXY_URL,
+                "http_proxy": GIT_PROXY_URL,
+                "https_proxy": GIT_PROXY_URL,
+            }
+        )
+
+    container = None
+    try:
+        container = docker_client.containers.create(
+            image=IMAGE_NAME,
+            command=[
+                "git",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.pager=cat",
+                "-c",
+                "commit.gpgsign=false",
+                *arguments,
+            ],
+            detach=True,
+            user="10001:10001",
+            working_dir="/workspace",
+            environment=environment,
+            network_mode=network_mode,
+            volumes={str(workspace_path): {"bind": "/workspace", "mode": "rw"}},
+            mem_limit="512m",
+            nano_cpus=500_000_000,
+            pids_limit=64,
+            read_only=True,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            tmpfs={
+                "/tmp": "rw,noexec,nosuid,size=64m",
+                "/run": "rw,noexec,nosuid,size=8m",
+            },
+            init=True,
+            labels={
+                "devbox.managed": "true",
+                "devbox.git_helper": "true",
+                "devbox.workspace_id": workspace_id,
+            },
+        )
+        container.start()
+        try:
+            result = container.wait(timeout=GIT_OPERATION_TIMEOUT_SECONDS)
+        except Exception as exc:
+            try:
+                container.stop(timeout=0)
+            except Exception:
+                logger.exception("Unable to stop timed-out Git helper")
+            raise HTTPException(
+                status_code=504, detail="Git operation exceeded its time limit."
+            ) from exc
+
+        output = container.logs(stdout=True, stderr=True)
+        decoded = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output)
+        decoded = decoded[-GIT_OUTPUT_LIMIT_BYTES:]
+        if result.get("StatusCode") != 0:
+            raise HTTPException(
+                status_code=422,
+                detail=decoded.strip() or "Git operation failed.",
+            )
+        return decoded.strip()
+    except HTTPException:
+        raise
+    except (APIError, DockerException) as exc:
+        logger.exception(
+            "Git helper could not execute",
+            extra={"workspace_id": workspace_id},
+        )
+        raise HTTPException(status_code=503, detail="Git execution service is unavailable.") from exc
+    finally:
+        if container is not None:
+            try:
+                container.remove(force=True)
+            except Exception:
+                logger.exception(
+                    "Unable to remove temporary Git helper",
+                    extra={"workspace_id": workspace_id},
+                )
+
+
 class LazyDockerClient:
     """Connect to Docker only when an operation actually needs the daemon."""
 
