@@ -1,20 +1,25 @@
-import yaml
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_egress_proxy_is_the_only_member_of_the_internal_egress_network():
-    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
-    internal = compose["networks"]["egress_internal"]
-    proxy = compose["services"]["egress-proxy"]
+def section_between(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
 
-    assert internal["internal"] is True
-    assert proxy["networks"] == ["egress_internal", "egress_public"]
-    assert "ports" not in proxy
-    assert "egress_internal" not in compose["services"]["worker"].get("networks", [])
-    assert "egress_internal" not in compose["services"]["api"].get("networks", [])
+
+def test_egress_proxy_is_the_only_member_of_the_internal_egress_network():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    proxy = section_between(compose, "  egress-proxy:\n", "  worker:\n")
+    worker = section_between(compose, "  worker:\n", "  api:\n")
+    api = section_between(compose, "  api:\n", "\nvolumes:")
+    networks = section_between(compose, "\nnetworks:\n", "")
+
+    assert "internal: true" in networks
+    assert "      - egress_internal\n      - egress_public" in proxy
+    assert "    ports:" not in proxy
+    assert "egress_internal" not in worker
+    assert "egress_internal" not in api
 
 
 def test_egress_proxy_blocks_private_and_unapproved_destinations():
