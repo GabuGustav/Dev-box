@@ -245,9 +245,10 @@ def test_reconciler_removes_exited_git_helpers_but_keeps_running_helpers(monkeyp
 
     exited = Helper("exited")
     running = Helper("running")
-    monkeypatch.setattr(
-        executor, "docker_client", type("Docker", (), {"containers": Containers([exited, running])})()
-    )
+    fake_docker = type(
+        "Docker", (), {"containers": Containers([exited, running])}
+    )()
+    monkeypatch.setattr(executor, "docker_client", fake_docker)
 
     removed = executor.reconcile_orphaned_git_helpers()
 
