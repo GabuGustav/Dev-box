@@ -18,6 +18,14 @@ class WorkspaceStorageError(RuntimeError):
     """Raised when the configured storage backend cannot enforce its policy."""
 
 
+def _set_owner(path: Path, uid: int, gid: int) -> None:
+    """Set ownership where the host platform supports POSIX ownership changes."""
+    chown = getattr(os, "chown", None)
+    if chown is None:
+        raise OSError("Changing file ownership requires a POSIX platform with os.chown.")
+    chown(path, uid, gid)
+
+
 class XFSWorkspaceStorage:
     """Persistent workspace directories with kernel-enforced XFS project quotas.
 
@@ -33,7 +41,7 @@ class XFSWorkspaceStorage:
         inode_limit: int = 200_000,
         *,
         runner=subprocess.run,
-        owner_setter=os.chown,
+        owner_setter=_set_owner,
     ) -> None:
         if not Path(root).is_absolute():
             raise WorkspaceStorageError("Workspace storage root must be an absolute path.")
