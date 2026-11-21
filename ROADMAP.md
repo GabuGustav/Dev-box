@@ -49,6 +49,7 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 - [x] Normalize repository URLs and store repository identities.
 - [x] Implement owner-scoped repository workspace discovery by normalized URL.
+- [x] Add a private allowlisted egress proxy on an internal-only helper network.
 - [ ] Clone repositories into workspaces.
 - [ ] Track remote, branch, commit, and dirty working-tree state.
 - [ ] Add branch, diff, commit, fetch, and push operations.
