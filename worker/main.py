@@ -78,13 +78,17 @@ class GitCommitRequest(BaseModel):
 
 
 def validate_git_repository_url(raw_url: str) -> str:
-    parsed = urlsplit(raw_url.strip())
+    try:
+        parsed = urlsplit(raw_url.strip())
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Repository URL is invalid.") from exc
     if (
         parsed.scheme != "https"
         or parsed.hostname not in GIT_ALLOWED_HOSTS
         or parsed.username
         or parsed.password
-        or parsed.port is not None
+        or port is not None
         or parsed.query
         or parsed.fragment
     ):
@@ -125,16 +129,24 @@ def validate_git_branch(branch: str) -> str:
     return branch
 
 
+def ensure_git_workspace(workspace_id: str) -> Path:
+    try:
+        return workspace_storage.ensure_workspace(workspace_id)
+    except HTTPException:
+        raise
+    except WorkspaceStorageError as exc:
+        raise HTTPException(
+            status_code=503, detail="Workspace storage is unavailable."
+        ) from exc
+
+
 def run_git_command(
     workspace_id: str,
     arguments: list[str],
     *,
     network_enabled: bool = False,
 ) -> str:
-    try:
-        workspace_path = workspace_storage.ensure_workspace(workspace_id)
-    except (WorkspaceStorageError, HTTPException) as exc:
-        raise HTTPException(status_code=503, detail="Workspace storage is unavailable.") from exc
+    workspace_path = ensure_git_workspace(workspace_id)
 
     environment = {
         "HOME": "/tmp",
@@ -249,7 +261,7 @@ class LazyDockerClient:
 
     def __getattr__(self, name):
         if self._client is None:
-            self._client = docker.from_env()
+            self._client = docker.from_env(timeout=GIT_OPERATION_TIMEOUT_SECONDS + 30)
         return getattr(self._client, name)
 
 
@@ -763,7 +775,26 @@ def delete_workspace(workspace_id: str) -> dict:
 def clone_workspace_repository(workspace_id: str, payload: GitCloneRequest) -> dict:
     repository_url = validate_git_repository_url(payload.repository_url)
     branch = validate_git_branch(payload.branch)
-    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    workspace_path = ensure_git_workspace(workspace_id)
+    if (workspace_path / ".git").is_dir():
+        existing_url = validate_git_repository_url(
+            run_git_command(workspace_id, ["remote", "get-url", "origin"])
+        )
+        existing_branch = run_git_command(
+            workspace_id, ["branch", "--show-current"]
+        )
+        if existing_url == repository_url and existing_branch == branch:
+            return {
+                "workspace_id": workspace_id,
+                "operation": "clone",
+                "repository_url": repository_url,
+                "branch": branch,
+                "output": "Repository already cloned.",
+            }
+        raise HTTPException(
+            status_code=409,
+            detail="Workspace already contains a different Git checkout.",
+        )
     if any(workspace_path.iterdir()):
         raise HTTPException(
             status_code=409,
@@ -791,7 +822,7 @@ def clone_workspace_repository(workspace_id: str, payload: GitCloneRequest) -> d
 )
 @serialize_workspace_operation
 def git_status(workspace_id: str) -> dict:
-    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    workspace_path = ensure_git_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
     output = run_git_command(workspace_id, ["status", "--short", "--branch"])
