@@ -77,6 +77,7 @@ All workspace endpoints require the `X-DevBox-Key` header.
 |---|---|---|
 | POST | `/api/v1/workspaces` | Register a workspace (metadata only) |
 | GET | `/api/v1/workspaces` | List the authenticated principal's workspaces |
+| GET | `/api/v1/workspaces/discover?repository_url=...` | Find only the authenticated principal's workspaces for a normalized repository URL |
 | GET | `/api/v1/workspaces/{workspace_id}` | Retrieve an owned workspace |
 | POST | `/api/v1/workspaces/{workspace_id}/start` | Create/start its isolated container and enforce its disk quota |
 | POST | `/api/v1/workspaces/{workspace_id}/stop` | Stop its container, retaining its workspace data |
@@ -125,6 +126,10 @@ pytest
 
 The API tests mock the executor service, and executor unit tests mock Docker SDK resources; neither requires a running Docker daemon. Kernel quota tests require `DEVBOX_TEST_XFS_ROOT` to point at an empty dedicated XFS test mount. Docker persistence tests additionally require `DEVBOX_RUN_DOCKER_INTEGRATION=1` and a Linux Docker host.
 
+## Repository discovery
+
+Use `GET /api/v1/workspaces/discover?repository_url=https://github.com/owner/repository` to reconnect to existing workspaces after a new chat or client session. The endpoint normalizes the repository URL and returns only workspaces owned by the authenticated principal; matching a repository never grants access to another agent's workspace.
+
 ## Next
 
-Run the opt-in Docker/XFS integration tests on a dedicated Linux host, then complete backup/restore drills and adversarial isolation testing before considering Phase 2 complete. Phase 3 will add repository cloning, authorized repository discovery, and Git operations.
+Run the opt-in Docker/XFS integration tests on a dedicated Linux host, then complete backup/restore drills and adversarial isolation testing before considering Phase 2 complete. Phase 3 continues with repository cloning, controlled egress, and Git operations.
