@@ -95,9 +95,10 @@ def test_git_helper_uses_network_none_for_local_operations(monkeypatch, tmp_path
     assert fake.containers.kwargs["read_only"] is True
     assert fake.containers.kwargs["labels"]["devbox.git_helper"] == "true"
     assert "devbox.managed" not in fake.containers.kwargs["labels"]
-    assert fake.containers.kwargs["command"][:4] == [
+    assert fake.containers.kwargs["command"][:5] == [
         "timeout",
         "--signal=TERM",
+        "--kill-after=5s",
         f"{executor.GIT_OPERATION_TIMEOUT_SECONDS}s",
         "git",
     ]
