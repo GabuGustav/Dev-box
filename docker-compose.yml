@@ -21,6 +21,9 @@ services:
       context: .
       dockerfile: egress-proxy.Dockerfile
     read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
     cap_drop:
       - ALL
     security_opt:
