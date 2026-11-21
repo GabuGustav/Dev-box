@@ -54,6 +54,7 @@ services:
       DATABASE_URL: postgresql+psycopg://devbox:devbox@db:5432/devbox
       EXECUTOR_SERVICE_URL: http://worker:9000
       EXECUTOR_SERVICE_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
+      LIFECYCLE_RECONCILE_INTERVAL_SECONDS: ${LIFECYCLE_RECONCILE_INTERVAL_SECONDS:-60}
     ports:
       - "8000:8000"
     depends_on:
