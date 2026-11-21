@@ -287,7 +287,7 @@ def create_git_commit(
     workspace = owned_workspace(db, principal, workspace_id)
     if workspace.status == "deleted":
         raise HTTPException(status_code=409, detail="Workspace is deleted.")
-    result = execute_git("commit", workspace, payload.message)
+    result = execute_git("commit", workspace, payload.message, payload.paths)
     record_git_event(
         db,
         request,
