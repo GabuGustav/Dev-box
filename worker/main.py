@@ -7,6 +7,7 @@ import re
 import threading
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import docker
