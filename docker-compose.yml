@@ -15,6 +15,22 @@ services:
       timeout: 5s
       retries: 10
 
+  egress-proxy:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: egress-proxy.Dockerfile
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    networks:
+      - egress_internal
+      - egress_public
+
   worker:
     restart: unless-stopped
     build:
@@ -35,6 +51,8 @@ services:
       DEVBOX_SNAPSHOT_MAX_COUNT: ${SNAPSHOT_MAX_COUNT:-10}
       DEVBOX_SNAPSHOT_MAX_BYTES: ${SNAPSHOT_MAX_BYTES:-10737418240}
       DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
+      DEVBOX_GIT_EGRESS_NETWORK: devbox_egress_internal
+      DEVBOX_GIT_PROXY_URL: http://egress-proxy:3128
     cap_add:
       - SYS_ADMIN
     volumes:
@@ -62,7 +80,16 @@ services:
         condition: service_healthy
       worker:
         condition: service_healthy
+      egress-proxy:
+        condition: service_started
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 volumes:
   devbox_postgres:
+
+networks:
+  egress_internal:
+    name: devbox_egress_internal
+    internal: true
+  egress_public:
+    name: devbox_egress_public
