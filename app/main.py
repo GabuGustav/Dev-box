@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,15 +10,40 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.logging_config import configure_logging
+from app.lifecycle import reconcile_once
 from app.routers import health, workspaces
 
 configure_logging(settings.log_level)
 logger = logging.getLogger("devbox.http")
 
+async def lifecycle_reconciliation_loop() -> None:
+    interval = max(5, settings.lifecycle_reconcile_interval_seconds)
+    while True:
+        try:
+            await asyncio.to_thread(reconcile_once)
+        except Exception:
+            logger.exception("Workspace lifecycle reconciliation cycle failed")
+        await asyncio.sleep(interval)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    reconciler = None
+    if settings.executor_service_token:
+        reconciler = asyncio.create_task(lifecycle_reconciliation_loop())
+    try:
+        yield
+    finally:
+        if reconciler is not None:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
+
+
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="Persistent, isolated development workspaces for AI agents.",
+    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
