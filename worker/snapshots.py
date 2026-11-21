@@ -305,12 +305,24 @@ class SnapshotStore:
             with temporary_path.open("xb") as output:
                 output.write(MAGIC + nonce)
                 writer = _EncryptingWriter(output, encryptor, self.max_snapshot_bytes)
+                entry_count = 0
+
+                def archive_filter(member: tarfile.TarInfo) -> tarfile.TarInfo:
+                    nonlocal entry_count
+                    filtered_member = self._archive_filter(member)
+                    entry_count += 1
+                    if entry_count > self.max_entries:
+                        raise SnapshotError(
+                            "Snapshot exceeds the configured entry limit."
+                        )
+                    return filtered_member
+
                 with tarfile.open(fileobj=writer, mode="w|") as archive:
                     archive.add(
                         str(workspace_path),
                         arcname=".",
                         recursive=True,
-                        filter=self._archive_filter,
+                        filter=archive_filter,
                     )
                 writer.flush()
                 output.write(encryptor.finalize())
