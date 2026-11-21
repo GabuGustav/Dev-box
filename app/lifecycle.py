@@ -29,6 +29,7 @@ def reconcile_workspace_statuses(db: Session, executor: ExecutorClient) -> int:
     changed = 0
 
     for workspace in workspaces:
+        previous_values = (workspace.status, workspace.executor_id, workspace.storage_ref)
         try:
             result = executor.get_status(workspace.id)
         except ExecutorUnavailable:
@@ -62,9 +63,14 @@ def reconcile_workspace_statuses(db: Session, executor: ExecutorClient) -> int:
 
         new_executor_id = result.get("container_id")
         new_storage_ref = result.get("storage_ref")
-        old_values = (workspace.status, workspace.executor_id, workspace.storage_ref)
+        db.refresh(workspace, with_for_update=True)
+        current_values = (workspace.status, workspace.executor_id, workspace.storage_ref)
+        if current_values != previous_values:
+            # A user lifecycle request committed while the executor was being queried.
+            # Do not let this older observation overwrite the newer API operation.
+            continue
         new_values = (new_status, new_executor_id, new_storage_ref)
-        if old_values == new_values:
+        if current_values == new_values:
             continue
 
         workspace.status = new_status
