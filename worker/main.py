@@ -791,6 +791,85 @@ def git_diff(workspace_id: str) -> dict:
     return {"workspace_id": workspace_id, "operation": "diff", "output": output}
 
 
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/git/branches",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def git_create_branch(workspace_id: str, payload: GitBranchRequest) -> dict:
+    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    if not (workspace_path / ".git").exists():
+        raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
+    branch = validate_git_branch(payload.branch)
+    run_git_command(workspace_id, ["check-ref-format", "--branch", branch])
+    output = run_git_command(workspace_id, ["switch", "--create", branch])
+    return {
+        "workspace_id": workspace_id,
+        "operation": "branch",
+        "branch": branch,
+        "output": output,
+    }
+
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/git/commit",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def git_commit(workspace_id: str, payload: GitCommitRequest) -> dict:
+    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    if not (workspace_path / ".git").exists():
+        raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
+    run_git_command(
+        workspace_id,
+        [
+            "-c",
+            "user.name=DevBox Agent",
+            "-c",
+            "user.email=devbox@localhost",
+            "add",
+            "--all",
+        ],
+    )
+    output = run_git_command(
+        workspace_id,
+        [
+            "-c",
+            "user.name=DevBox Agent",
+            "-c",
+            "user.email=devbox@localhost",
+            "commit",
+            "-m",
+            payload.message,
+        ],
+    )
+    commit = run_git_command(workspace_id, ["rev-parse", "HEAD"])
+    return {
+        "workspace_id": workspace_id,
+        "operation": "commit",
+        "commit": commit,
+        "output": output,
+    }
+
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/git/fetch",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def git_fetch(workspace_id: str, repository_url: str) -> dict:
+    workspace_path = workspace_storage.ensure_workspace(workspace_id)
+    if not (workspace_path / ".git").exists():
+        raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
+    trusted_url = validate_git_repository_url(repository_url)
+    run_git_command(workspace_id, ["remote", "set-url", "origin", trusted_url])
+    output = run_git_command(
+        workspace_id, ["fetch", "--prune", "origin"], network_enabled=True
+    )
+    return {"workspace_id": workspace_id, "operation": "fetch", "output": output}
+
+
 @app.get(
     "/internal/workspaces/{workspace_id}/status",
     dependencies=[Depends(require_service_token)],
