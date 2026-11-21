@@ -161,8 +161,8 @@ class XFSWorkspaceStorage:
                 return (
                     int(existing[0]),
                     bool(existing[2]),
-                    existing[3],
-                    existing[4],
+                    int(existing[3]) if existing[3] is not None else None,
+                    int(existing[4]) if existing[4] is not None else None,
                 )
             collision = connection.execute(
                 "SELECT workspace_id FROM workspace_projects WHERE project_id = ?",
@@ -192,7 +192,7 @@ class XFSWorkspaceStorage:
             cursor = connection.execute(
                 "UPDATE workspace_projects "
                 "SET initialized = 1, device = ?, inode = ? WHERE workspace_id = ?",
-                (stat.st_dev, stat.st_ino, workspace_id),
+                (str(stat.st_dev), str(stat.st_ino), workspace_id),
             )
             if cursor.rowcount != 1:
                 raise WorkspaceStorageError("Workspace project registry entry is missing.")
@@ -242,8 +242,8 @@ class XFSWorkspaceStorage:
         directory_stat = directory.stat(follow_symlinks=False)
         if initialized and registered_device is not None and registered_inode is not None:
             if (directory_stat.st_dev, directory_stat.st_ino) != (
-                registered_device,
-                registered_inode,
+                int(registered_device),
+                int(registered_inode),
             ):
                 raise WorkspaceStorageError(
                     "Workspace directory identity changed; refusing to attach replaced data."
@@ -373,7 +373,9 @@ class XFSWorkspaceStorage:
             if directory.exists():
                 directory_stat = directory.stat(follow_symlinks=False)
                 if row[2] is not None and row[3] is not None:
-                    if (directory_stat.st_dev, directory_stat.st_ino) != (row[2], row[3]):
+                    if (directory_stat.st_dev, directory_stat.st_ino) != (
+                        int(row[2]), int(row[3])
+                    ):
                         raise WorkspaceStorageError(
                             "Workspace directory identity changed; refusing deletion."
                         )
