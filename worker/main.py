@@ -5,9 +5,9 @@ import logging
 import os
 import re
 import threading
-from urllib.parse import urlsplit
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
+from urllib.parse import urlsplit
 
 import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
@@ -39,7 +39,9 @@ SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3
 RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))
 GIT_EGRESS_NETWORK = os.getenv("DEVBOX_GIT_EGRESS_NETWORK", "devbox_egress_internal")
 GIT_PROXY_URL = os.getenv("DEVBOX_GIT_PROXY_URL", "http://egress-proxy:3128")
-GIT_OPERATION_TIMEOUT_SECONDS = max(10, min(600, int(os.getenv("DEVBOX_GIT_OPERATION_TIMEOUT_SECONDS", "300"))))
+GIT_OPERATION_TIMEOUT_SECONDS = max(
+    10, min(600, int(os.getenv("DEVBOX_GIT_OPERATION_TIMEOUT_SECONDS", "300")))
+)
 GIT_OUTPUT_LIMIT_BYTES = 64 * 1024
 GIT_ALLOWED_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 workspace_storage = XFSWorkspaceStorage(
@@ -55,6 +57,8 @@ snapshot_store = SnapshotStore(
     max_snapshots=SNAPSHOT_MAX_COUNT,
     max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
 )
+
+
 class GitCloneRequest(BaseModel):
     repository_url: str = Field(min_length=8, max_length=500)
     branch: str = Field(min_length=1, max_length=255)
@@ -85,11 +89,17 @@ def validate_git_repository_url(raw_url: str) -> str:
     ):
         raise HTTPException(
             status_code=422,
-            detail="Git operations currently support public HTTPS repositories on GitHub, GitLab, and Bitbucket.",
+            detail=(
+                "Git operations currently support public HTTPS repositories on "
+                "GitHub, GitLab, and Bitbucket."
+            ),
         )
     parts = [part for part in parsed.path.strip("/").split("/") if part]
     if len(parts) != 2 or any(part in {".", ".."} for part in parts):
-        raise HTTPException(status_code=422, detail="Repository URL must identify an owner and repository.")
+        raise HTTPException(
+            status_code=422,
+            detail="Repository URL must identify an owner and repository.",
+        )
     repository = parts[1][:-4] if parts[1].endswith(".git") else parts[1]
     if not parts[0] or not repository:
         raise HTTPException(status_code=422, detail="Repository URL is invalid.")
@@ -196,7 +206,11 @@ def run_git_command(
             ) from exc
 
         output = container.logs(stdout=True, stderr=True)
-        decoded = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output)
+        decoded = (
+            output.decode("utf-8", errors="replace")
+            if isinstance(output, bytes)
+            else str(output)
+        )
         decoded = decoded[-GIT_OUTPUT_LIMIT_BYTES:]
         if result.get("StatusCode") != 0:
             raise HTTPException(
@@ -211,7 +225,9 @@ def run_git_command(
             "Git helper could not execute",
             extra={"workspace_id": workspace_id},
         )
-        raise HTTPException(status_code=503, detail="Git execution service is unavailable.") from exc
+        raise HTTPException(
+            status_code=503, detail="Git execution service is unavailable."
+        ) from exc
     finally:
         if container is not None:
             try:
