@@ -47,8 +47,8 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 ## Phase 3 — Git and repository discovery
 
-- [ ] Normalize repository URLs and store repository identities.
-- [ ] Implement authorized repository lookup.
+- [x] Normalize repository URLs and store repository identities.
+- [x] Implement owner-scoped repository workspace discovery by normalized URL.
 - [ ] Clone repositories into workspaces.
 - [ ] Track remote, branch, commit, and dirty working-tree state.
 - [ ] Add branch, diff, commit, fetch, and push operations.
