@@ -307,3 +307,89 @@ def test_reconciliation_stops_container_when_workspace_storage_is_unavailable(mo
 
     assert stopped == 1
     assert container.stopped is True
+
+
+class StatusContainer:
+    id = "container-status"
+
+    def __init__(self, name, workspace_id, source, status="running"):
+        self.name = name
+        self.status = status
+        self.stopped = False
+        self.attrs = {
+            "Config": {
+                "Labels": {
+                    "devbox.managed": "true",
+                    "devbox.workspace_id": workspace_id,
+                }
+            },
+            "Mounts": [{"Destination": "/workspace", "Source": source}],
+        }
+
+    def reload(self):
+        return None
+
+    def stop(self, timeout):
+        self.stopped = True
+        self.status = "exited"
+
+
+def test_workspace_status_reports_authoritative_container_state(monkeypatch, tmp_path):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage_path = tmp_path / "workspace"
+    storage_path.mkdir()
+    fake = FakeDockerClient()
+    container = StatusContainer(
+        executor.names_for(workspace_id)[0], workspace_id, str(storage_path)
+    )
+    fake.containers.existing = container
+    monkeypatch.setattr(executor, "docker_client", fake)
+    monkeypatch.setattr(executor, "NotFound", MissingResource)
+    monkeypatch.setattr(executor, "workspace_storage", FakeStorage(storage_path))
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
+
+    result = executor.get_workspace_status(workspace_id)
+
+    assert result == {
+        "workspace_id": workspace_id,
+        "container_id": "container-status",
+        "storage_ref": executor.names_for(workspace_id)[1],
+        "state": "running",
+    }
+
+
+def test_workspace_status_fails_closed_on_invalid_storage_binding(monkeypatch, tmp_path):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage_path = tmp_path / "workspace"
+    storage_path.mkdir()
+    fake = FakeDockerClient()
+    container = StatusContainer(
+        executor.names_for(workspace_id)[0], workspace_id, str(tmp_path / "wrong")
+    )
+    fake.containers.existing = container
+    monkeypatch.setattr(executor, "docker_client", fake)
+    monkeypatch.setattr(executor, "NotFound", MissingResource)
+    monkeypatch.setattr(executor, "workspace_storage", FakeStorage(storage_path))
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
+
+    result = executor.get_workspace_status(workspace_id)
+
+    assert result["state"] == "failed"
+    assert result["container_id"] is None
+    assert container.stopped is True
+
+
+def test_workspace_status_reports_absent_container(monkeypatch, tmp_path):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage_path = tmp_path / "workspace"
+    storage_path.mkdir()
+    fake = FakeDockerClient()
+    monkeypatch.setattr(executor, "docker_client", fake)
+    monkeypatch.setattr(executor, "NotFound", MissingResource)
+    monkeypatch.setattr(executor, "workspace_storage", FakeStorage(storage_path))
+    monkeypatch.setattr(executor, "snapshot_store", FakeSnapshotStore())
+
+    result = executor.get_workspace_status(workspace_id)
+
+    assert result["state"] == "absent"
+    assert result["container_id"] is None
