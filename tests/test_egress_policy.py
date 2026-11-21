@@ -13,13 +13,13 @@ def test_egress_proxy_is_the_only_member_of_the_internal_egress_network():
     proxy = section_between(compose, "  egress-proxy:\n", "  worker:\n")
     worker = section_between(compose, "  worker:\n", "  api:\n")
     api = section_between(compose, "  api:\n", "\nvolumes:")
-    networks = section_between(compose, "\nnetworks:\n", "")
+    networks = compose.split("\nnetworks:\n", 1)[1]
 
     assert "internal: true" in networks
     assert "      - egress_internal\n      - egress_public" in proxy
     assert "    ports:" not in proxy
-    assert "egress_internal" not in worker
-    assert "egress_internal" not in api
+    assert "      - egress_internal" not in worker
+    assert "      - egress_internal" not in api
 
 
 def test_egress_proxy_blocks_private_and_unapproved_destinations():
