@@ -204,7 +204,8 @@ def test_git_commit_only_stages_explicit_paths(monkeypatch, tmp_path):
     assert len(calls) == 2
     assert calls[0][0:2] == ["-c", "user.name=DevBox Agent"]
     assert "add" not in calls[0]
-    assert calls[1][-2:] == ["-m", "Commit staged work"]
+    assert calls[0][-2:] == ["-m", "Commit staged work"]
+    assert calls[1] == ["rev-parse", "HEAD"]
 
 
 def test_git_commit_rejects_path_traversal(monkeypatch, tmp_path):
