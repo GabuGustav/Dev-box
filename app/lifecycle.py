@@ -83,7 +83,7 @@ def reconcile_workspace_statuses(db: Session, executor: ExecutorClient) -> int:
                 target_type="workspace",
                 target_id=workspace.id,
                 details={
-                    "previous_status": old_values[0],
+                    "previous_status": previous_values[0],
                     "status": new_status,
                     "executor_state": executor_state,
                 },
