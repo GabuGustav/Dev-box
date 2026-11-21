@@ -109,11 +109,13 @@ class ExecutorClient:
             json_body={"branch": branch},
         )
 
-    def git_commit(self, workspace_id: str, message: str) -> dict:
+    def git_commit(
+        self, workspace_id: str, message: str, paths: list[str] | None = None
+    ) -> dict:
         return self._request(
             "POST",
             f"/internal/workspaces/{workspace_id}/git/commit",
-            json_body={"message": message},
+            json_body={"message": message, "paths": paths or []},
         )
 
     def git_fetch(self, workspace_id: str, repository_url: str) -> dict:
