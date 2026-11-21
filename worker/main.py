@@ -908,6 +908,8 @@ def git_create_branch(workspace_id: str, payload: GitBranchRequest) -> dict:
 )
 @serialize_workspace_operation
 def git_commit(workspace_id: str, payload: GitCommitRequest) -> dict:
+    if not payload.message.strip():
+        raise HTTPException(status_code=422, detail="Commit message cannot be blank.")
     workspace_path = ensure_git_workspace(workspace_id)
     if not (workspace_path / ".git").exists():
         raise HTTPException(status_code=409, detail="Workspace has not been cloned.")
@@ -915,6 +917,7 @@ def git_commit(workspace_id: str, payload: GitCommitRequest) -> dict:
         for path in payload.paths:
             if (
                 not path
+                or len(path) > 500
                 or path.startswith("/")
                 or path.startswith("-")
                 or "\\" in path
