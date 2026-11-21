@@ -77,3 +77,6 @@ class ExecutorClient:
             "DELETE",
             f"/internal/workspaces/{workspace_id}/snapshots/{snapshot_id}",
         )
+
+    def get_status(self, workspace_id: str) -> dict:
+        return self._request("GET", f"/internal/workspaces/{workspace_id}/status")
