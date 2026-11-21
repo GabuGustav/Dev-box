@@ -256,3 +256,27 @@ def test_reconciler_removes_exited_git_helpers_but_keeps_running_helpers(monkeyp
     assert removed == 1
     assert exited.removed is True
     assert running.removed is False
+
+
+def test_git_commit_stages_only_requested_relative_paths(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    calls = []
+    monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
+    monkeypatch.setattr(
+        executor,
+        "run_git_command",
+        lambda workspace_id, arguments, network_enabled=False: (
+            calls.append(arguments) or "ok"
+        ),
+    )
+
+    executor.git_commit(
+        "dbx_abcdefghijklmnopqrstuv",
+        executor.GitCommitRequest(
+            message="Commit one file",
+            paths=["src/main.py"],
+        ),
+    )
+
+    assert calls[0] == ["add", "--", "src/main.py"]
+    assert calls[1][-2:] == ["-m", "Commit one file"]
