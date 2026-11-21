@@ -223,13 +223,17 @@ def run_git_command(
                 status_code=504, detail="Git operation exceeded its time limit."
             ) from exc
 
-        output = container.logs(stdout=True, stderr=True)
-        decoded = (
-            output.decode("utf-8", errors="replace")
-            if isinstance(output, bytes)
-            else str(output)
-        )
-        decoded = decoded[-GIT_OUTPUT_LIMIT_BYTES:]
+        output = container.logs(stdout=True, stderr=True, stream=True)
+        collected = bytearray()
+        if isinstance(output, bytes):
+            collected.extend(output[-GIT_OUTPUT_LIMIT_BYTES:])
+        else:
+            for chunk in output:
+                remaining = GIT_OUTPUT_LIMIT_BYTES - len(collected)
+                if remaining <= 0:
+                    break
+                collected.extend(chunk[:remaining])
+        decoded = collected.decode("utf-8", errors="replace")
         if result.get("StatusCode") != 0:
             raise HTTPException(
                 status_code=422,
