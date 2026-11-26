@@ -1,4 +1,5 @@
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -365,3 +366,73 @@ def test_broker_storage_api_maps_storage_failures_to_service_unavailable(
     with pytest.raises(HTTPException) as error:
         broker.api_validate_storage("workspace")
     assert error.value.status_code == 503
+
+
+def test_broker_restore_commit_performs_workspace_swap(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeXFSStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "old.txt").write_text("old", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "new.txt").write_text("new", encoding="utf-8")
+
+    result = broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert result["state"] == "restored"
+    assert (workspace / "new.txt").read_text(encoding="utf-8") == "new"
+    assert not (workspace / "old.txt").exists()
+    assert not stage.exists()
+    assert not (tmp_path / f".{workspace.name}.restore-backup").exists()
+    assert ("mark", workspace_id, str(workspace)) in storage.calls
+    assert ("quota", workspace_id, 1) in storage.calls
+
+
+def test_broker_restore_recovery_restores_previous_workspace(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeXFSStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    backup = tmp_path / f".{workspace.name}.restore-backup"
+    backup.mkdir()
+    (backup / "previous.txt").write_text("safe", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+
+    result = broker.api_recover_storage_restore("workspace", workspace_id)
+
+    assert result["state"] == "recovered"
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "safe"
+    assert not backup.exists()
+    assert not stage.exists()
+    assert ("quota", workspace_id, 1) in storage.calls
+
+
+def test_broker_prepares_mount_root_and_legacy_metadata_for_group_access(tmp_path, monkeypatch):
+    root = tmp_path / "xfs"
+    root.mkdir()
+    legacy = root / ".devbox-snapshots.sqlite3"
+    legacy.write_text("legacy", encoding="utf-8")
+    ownership = []
+    monkeypatch.setattr(broker.os, "chown", lambda path, uid, gid: ownership.append((Path(path), uid, gid)))
+
+    broker.prepare_shared_storage_permissions(SimpleNamespace(root=root))
+
+    assert root.stat().st_mode & 0o7777 == 0o2750
+    assert legacy.stat().st_mode & 0o777 == 0o640
+    assert ownership == [(root, 0, 10001), (legacy, 0, 10001)]
+
+
+def test_broker_initializes_worker_state_for_dedicated_identity(tmp_path, monkeypatch):
+    state = tmp_path / "worker-state"
+    ownership = []
+    monkeypatch.setattr(broker, "WORKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker.os, "chown", lambda path, uid, gid: ownership.append((Path(path), uid, gid)))
+
+    broker.prepare_worker_state()
+
+    assert state.is_dir()
+    assert state.stat().st_mode & 0o777 == 0o700
+    assert ownership == [(state, 10002, 10001)]
