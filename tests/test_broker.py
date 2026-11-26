@@ -124,6 +124,7 @@ def test_start_workspace_uses_only_fixed_hardened_container_configuration(
     workspace_id, path = workspace_fixture(tmp_path, monkeypatch)
     fake = FakeDocker()
     monkeypatch.setattr(broker, "docker_client", fake)
+    monkeypatch.setattr(broker, "NotFound", MissingContainer)
 
     result = broker.start_workspace(workspace_id)
 
@@ -151,9 +152,10 @@ def test_start_workspace_rejects_existing_container_with_wrong_mount(
     workspace_id, path = workspace_fixture(tmp_path, monkeypatch)
     fake = FakeDocker()
     name, _ = broker.names_for(workspace_id)
-    unsafe = FakeContainer(name, workspace_id, path / "wrong")
+    unsafe = FakeContainer(name, workspace_id, path / "wrong", status="running")
     fake.containers.items[name] = unsafe
     monkeypatch.setattr(broker, "docker_client", fake)
+    monkeypatch.setattr(broker, "NotFound", MissingContainer)
 
     with pytest.raises(HTTPException) as error:
         broker.start_workspace(workspace_id)
