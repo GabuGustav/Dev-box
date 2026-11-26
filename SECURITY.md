@@ -30,7 +30,7 @@ Default policy:
 - Enforce CPU, memory, disk block and inode, process, file descriptor, and wall-clock quotas.
 - Kill descendant processes and clean temporary resources on cancellation or deletion.
 
-The trusted storage worker has Docker socket access and CAP_SYS_ADMIN to administer XFS quotas; compromise of that worker can compromise the host. Keep it private and treat it as a privileged control-plane component. Containers reduce risk but share the host kernel. For hostile multi-tenant workloads, evaluate microVMs or dedicated VMs as a stronger boundary.
+The privileged broker has Docker socket access and CAP_SYS_ADMIN to administer XFS quotas; compromise of the broker can compromise the host. Keep it private and treat it as a privileged infrastructure component. The orchestration worker runs as UID/GID 10002:10001, drops all Linux capabilities, uses a read-only root filesystem, and reaches the broker only over a private authenticated network. It still has group-based read/write access to workspace and snapshot trees on shared mounts, so a compromised worker can access multiple tenants' data. This is a blast-radius reduction, not hostile-tenant isolation. Containers reduce risk but share the host kernel. For hostile multi-tenant workloads, evaluate microVMs or dedicated VMs as a stronger boundary.
 
 ## 4. Identity and authorization
 
@@ -128,31 +128,41 @@ Provide:
 
 ## 12. Phase 2 audit status (2026-11-26)
 
-The current implementation has useful baseline controls, but must not be described as production-ready for hostile multi-tenant execution.
+The reviewed implementation has useful baseline controls but is **not production-ready for hostile multi-tenant execution**. Confirmed deployment-default problems have been corrected on the security-hardening branch. The current work reduces the worker's ambient privileges but does not yet provide per-tenant storage isolation.
 
-### Confirmed deployment risks
+### Deployment exposure — remediated in the current branch lineage
 
-- The reviewed Compose configuration publishes PostgreSQL on host port 5432 and supplies static `devbox/devbox` credentials. Remove host publication and inject deployment-specific secrets.
-- The reviewed Compose configuration publishes the API on host port 8000 and starts Uvicorn directly over HTTP. This is for trusted local development only; external deployments require TLS termination and a documented trusted-proxy configuration.
-- The worker mounts the Docker socket and receives `CAP_SYS_ADMIN` for Docker/XFS operations. Compromise of this process can compromise the host. This is an elevated trust-boundary risk, not proof of a remotely exploitable path.
+- PostgreSQL no longer publishes a host port and uses a required deployment-specific `DB_PASSWORD`.
+- The API binds to host loopback by default. Plain HTTP is permitted only behind a trusted local/reverse-proxy network; external deployments require TLS termination.
+- Compose does not publish worker or broker ports.
+
+### Privileged execution boundary — brokered, rootless worker transition in progress
+
+- The Docker socket, Docker SDK, and XFS quota commands are broker-owned. The worker has no Docker socket and no `CAP_SYS_ADMIN`.
+- The broker is the only service with Docker socket access and `CAP_SYS_ADMIN`; it is host-privileged and must remain private.
+- The current branch configures the worker as UID/GID `10002:10001`, drops all capabilities, enables `no-new-privileges`, and makes its root filesystem read-only. The worker state volume is separate from broker state and XFS mount roots.
+- The worker retains group-based read/write access to all workspace and snapshot trees because snapshot encryption and Git operations still run in the worker. A compromised worker can therefore access multiple tenants' data. Do not describe this as hostile-tenant isolation.
+- Snapshot directory swaps and interrupted-restore recovery are delegated to typed broker operations so the worker does not need write access to the XFS mount root.
+
+The rootless-worker code and tests are committed on `phase-2-xfs-quota-broker`; CI verification is pending. The parent branch `phase-2-privileged-broker` passed run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247): 146 unit tests passed, five were skipped in the quality job, and all five dedicated Linux XFS/Docker integration tests passed.
 
 ### Controls observed in source
 
-Workspace containers run as a non-root user, drop Linux capabilities, use a read-only root filesystem, enable `no-new-privileges`, use private PID/IPC namespaces, apply CPU/memory/PID limits, and default to no network. Snapshot code uses authenticated AES-GCM encryption and rejects multiple unsafe archive entry types. API keys are stored as hashes and workspace ownership checks are present in the inspected routes.
+Workspace containers run as a non-root user, drop Linux capabilities, use a read-only root filesystem, enable `no-new-privileges`, use private PID/IPC namespaces, apply CPU/memory/PID limits, and default to no network. Snapshot code uses authenticated AES-GCM encryption and rejects unsafe archive entry types. API keys are stored as hashes and workspace ownership checks are present in the inspected routes.
 
 These controls reduce risk but do not establish a VM-equivalent isolation boundary.
 
 ### Verification still required
 
+- CI verification of the rootless worker, persistent metadata migration, broker restore transitions, and group-permission model.
 - Adversarial container escape and cross-workspace tests on supported Linux hosts.
 - Explicit seccomp/AppArmor/SELinux policy validation and user-namespace assessment.
 - Proxy bypass, DNS rebinding, IPv4/IPv6, and metadata endpoint tests.
 - Malicious snapshot archive, interrupted restore, and concurrent operation tests.
-- Real XFS quota, Docker persistence, backup, and restore drills.
+- Real XFS quota, Docker persistence, backup, and restore drills beyond the five-test baseline.
 - Distributed locking before multiple worker processes or replicas are supported.
 
-Track implementation and evidence in [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md). Do not mark an item complete based on a documentation change or mocked test alone.
-
+Track implementation and evidence in [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md) and [docs/PHASE_2_2_3_ROOTLESS_WORKER.md](docs/PHASE_2_2_3_ROOTLESS_WORKER.md). Do not mark an item complete based on a documentation change or mocked test alone.
 
 ## 13. External security references
 
@@ -163,31 +173,9 @@ The remediation plan follows these primary references:
 - [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html) — reinforces that Docker socket access is effectively host-root access and that a read-only socket mount does not make the API read-only.
 - [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — documents project-tree initialization and quota management operations used by the current storage backend.
 
-The proposed host broker is therefore an application-level, typed capability boundary; it must not be a generic Docker socket proxy that forwards arbitrary daemon endpoints.
+The host broker is an application-level, typed capability boundary; it is not a generic Docker socket proxy.
 
+## 14. Verification evidence
 
-## 14. Remediation verification evidence
+CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830556) verified the deployment-default changes and baseline Linux XFS/Docker integration. CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) verified the broker Docker migration, all image builds, Compose validation, Ruff, 146 passing unit tests, and all five Linux XFS/Docker integration tests. Neither run verifies the new rootless-worker changes on this branch.
 
-CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830556) passed on the security-hardening branch:
-
-- Quality job: Compose validation and image builds passed; Ruff passed; 109 tests passed, 5 skipped; coverage 75%.
-- Linux XFS/Docker integration job: 5 tests passed on disposable loopback XFS project-quota filesystems. This included block/inode quota enforcement, encrypted snapshot restore across separate XFS mounts, workspace mount isolation, persistence across container replacement, and private PID namespace isolation.
-
-The integration run caught and led to correction of an invalid explicit Docker `pid_mode="private"` value. DevBox now relies on Docker's default private PID namespace, and the integration test verifies the isolation behavior.
-
-This verifies the current baseline and Phase 2.1 deployment hardening; it does **not** complete the privileged-worker boundary, adversarial snapshot archive fuzzing, proxy bypass/DNS rebinding testing, distributed concurrency, or hostile-tenant isolation goals.
-
-
-## 15. Privileged broker migration status
-
-The `phase-2-privileged-broker` branch now contains a broker service skeleton, a separate broker token, an internal-only Compose network, fixed workspace container lifecycle operations, a Git helper command allowlist, and broker authorization/configuration tests.
-
-**This is not yet a privilege reduction in the running stack.** The worker no longer mounts `/var/run/docker.sock` and no longer includes the Docker SDK. It still receives `CAP_SYS_ADMIN` because XFS quota commands remain local. The broker is now the only service with Docker daemon access; it also has `CAP_SYS_ADMIN` for the upcoming XFS migration. Do not deploy this intermediate branch as a hardened production release. The worker-to-broker migration and XFS quota delegation must complete before the worker's socket and capability are removed.
-
-
-The initial broker service skeleton passed CI run [45862764928](https://github.com/GabuGustav/Dev-box/actions/runs/45862764928): 132 tests passed, five were skipped in the quality job, Ruff and all image builds passed, and the separate XFS/Docker integration job passed all five integration tests. Broker-inclusive coverage is 69%.
-
-The broker's typed workspace and Git operations are not yet used by the worker. The worker still has its original Docker socket mount and `CAP_SYS_ADMIN`; no privilege reduction should be claimed until those are removed after migration.
-
-
-CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed: 146 tests passed, five skipped, 71% broker-inclusive coverage, all image builds and Compose validation passed, and all five real XFS/Docker integration tests passed. The worker-to-broker Docker migration is verified; XFS delegation is the remaining worker capability blocker.
