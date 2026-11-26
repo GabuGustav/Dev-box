@@ -176,19 +176,21 @@ The user's laptop should be only an AI client/browser. Builds run on the DevBox 
 - Never treat a successful build as proof of runtime correctness.
 
 
-## 13. Privileged execution boundary — remediation required
+## 13. Privileged execution boundary
 
-The current deployment has a trusted worker process that mounts the Docker socket and receives `CAP_SYS_ADMIN` to provision containers and administer XFS project quotas. This worker is host-privileged in practical terms. It must be treated as infrastructure, not as an ordinary application worker.
+The execution plane separates the API, an orchestration worker, a privileged host broker, and untrusted workspace containers.
 
-The target architecture separates:
+1. **API/control plane:** authenticates principals, enforces workspace ownership, and calls the worker over its authenticated service API.
+2. **Orchestration worker:** runs as UID/GID `10002:10001`, drops all Linux capabilities, enables `no-new-privileges`, and uses a read-only root filesystem. It has no Docker socket, Docker SDK, or XFS quota command access.
+3. **Privileged host broker:** the only service with Docker socket access and `CAP_SYS_ADMIN`. It exposes typed workspace, Git-helper, and XFS storage operations over a private authenticated network. It derives paths, project IDs, images, mounts, and container configuration internally; it does not proxy arbitrary Docker API requests.
+4. **Workspace runtime:** remains untrusted and receives only its own workspace directory. It never receives the Docker socket, broker credentials, worker state, broker state, or snapshot storage.
 
-1. **Unprivileged orchestration worker:** validates user/workspace intent, schedules operations, and communicates over an authenticated narrow protocol.
-2. **Privileged host broker:** performs only typed, allowlisted Docker and XFS operations. It must not expose arbitrary Docker API passthrough, arbitrary host paths, or shell execution.
-3. **Workspace runtime:** remains untrusted and receives only its own workspace mount; never receives the Docker socket or broker credentials.
+The broker owns the XFS project registries in its private `broker_state` volume. It prepares XFS mount roots as root-owned/group `10001`, mode `2750`, and per-workspace directories as `10001:10001`, mode `2770`. The worker's persistent snapshot metadata is stored separately in `worker_state`; legacy snapshot metadata is migrated read-only from the snapshot mount.
 
-The broker is partially implemented: workspace container lifecycle, image management, Git helper execution, reconciliation, and authenticated worker RPC are in place. The worker no longer mounts the Docker socket or includes the Docker SDK. XFS quota administration remains in the worker, which still receives `CAP_SYS_ADMIN`; that capability must move behind the broker before the worker can be considered unprivileged. The worker also retains shared access to workspace/snapshot storage, so this is not yet a hostile-tenant data-isolation boundary.
+Snapshot archive reads/writes still occur in the worker. The worker therefore retains group-based read/write access to all workspace and snapshot directories on the shared XFS mounts. This reduces the consequences of worker compromise compared with a root/Docker-capable worker, but it does **not** provide hostile-tenant data isolation. A future per-workspace storage service or VM/microVM boundary is required to prevent a compromised worker from reading other tenants' data.
 
-The current Compose deployment keeps PostgreSQL internal and binds the API to host loopback by default. Production deployment must terminate TLS at a trusted reverse proxy before exposing the API externally. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
+Snapshot restore directory swaps and recovery are broker operations because the worker is not allowed to write to the XFS mount root. The broker validates the derived workspace/staging/backup paths, performs the atomic rename sequence, refreshes the registered directory identity, resets quotas, and fsyncs the mount root.
 
+The Compose deployment keeps PostgreSQL internal and binds the API to host loopback by default. Production deployment must terminate TLS at a trusted reverse proxy before exposing the API externally. See [DEPLOYMENT.md](DEPLOYMENT.md) and [docs/PHASE_2_2_3_ROOTLESS_WORKER.md](docs/PHASE_2_2_3_ROOTLESS_WORKER.md).
 
 **PID namespace note:** the workspace runtime relies on Docker's default private PID namespace. The Docker API does not accept `pid_mode="private"`; omitting the setting selects the private default. The Linux integration test verifies that one workspace cannot see another workspace's process marker.
