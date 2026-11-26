@@ -112,6 +112,7 @@ class SnapshotStore:
         max_snapshots: int = 10,
         max_snapshot_bytes: int = 10 * 1024 * 1024 * 1024,
         max_entries: int = 200_000,
+        registry_path: str | Path | None = None,
     ) -> None:
         key = None
         key_error = None
@@ -137,9 +138,45 @@ class SnapshotStore:
         self.max_snapshots = max_snapshots
         self.max_snapshot_bytes = max_snapshot_bytes
         self.max_entries = max_entries
-        self.registry = storage.root / ".devbox-snapshots.sqlite3"
+        self.legacy_registry = storage.root / ".devbox-snapshots.sqlite3"
+        self.registry = Path(registry_path) if registry_path else self.legacy_registry
+        if not self.registry.is_absolute():
+            raise SnapshotError("Snapshot metadata registry path must be absolute.")
+        self._migrate_legacy_registry()
+
+    def _migrate_legacy_registry(self) -> None:
+        if self.registry == self.legacy_registry or self.registry.exists():
+            if self.registry.is_symlink() or (self.registry.exists() and not self.registry.is_file()):
+                raise SnapshotError("Snapshot metadata registry path is unsafe.")
+            return
+        legacy = self.legacy_registry
+        if not legacy.exists():
+            return
+        if legacy.is_symlink() or not legacy.is_file():
+            raise SnapshotError("Legacy snapshot metadata registry is unsafe.")
+        temporary = self.registry.with_name(self.registry.name + ".migrating")
+        if temporary.is_symlink() or temporary.exists():
+            raise SnapshotError("Snapshot metadata migration path already exists or is unsafe.")
+        try:
+            self.registry.parent.mkdir(parents=True, exist_ok=True)
+            source = sqlite3.connect(legacy.resolve().as_uri() + "?mode=ro", uri=True)
+            destination = sqlite3.connect(temporary)
+            try:
+                source.backup(destination)
+                destination.commit()
+            finally:
+                destination.close()
+                source.close()
+            temporary.chmod(0o600)
+            os.replace(temporary, self.registry)
+        except (OSError, sqlite3.Error) as exc:
+            temporary.unlink(missing_ok=True)
+            raise SnapshotError("Unable to migrate the legacy snapshot metadata registry.") from exc
 
     def _connect(self) -> sqlite3.Connection:
+        if self.registry.is_symlink() or (self.registry.exists() and not self.registry.is_file()):
+            raise SnapshotError("Snapshot metadata registry path is unsafe.")
+        self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30)
         connection.execute(
             """CREATE TABLE IF NOT EXISTS snapshots (
@@ -156,11 +193,9 @@ class SnapshotStore:
 
     def _workspace_directory(self, workspace_id: str) -> Path:
         directory = self.storage.ensure_workspace(workspace_id)
-        try:
-            self.storage.owner_setter(directory, 0, 0)
-            directory.chmod(0o700)
-        except OSError as exc:
-            raise SnapshotError("Unable to secure the snapshot directory.") from exc
+        directory_stat = directory.stat(follow_symlinks=False)
+        if directory_stat.st_gid != 10001 or directory_stat.st_mode & 0o070 != 0o070:
+            raise SnapshotError("Snapshot directory does not have the broker-managed workspace-group permissions.")
 
         if not self.registry.exists() and any(
             entry.name.endswith(".dbxsnap") or entry.name.endswith(".dbxsnap.tmp")
@@ -458,7 +493,7 @@ class SnapshotStore:
                         raise SnapshotError("Snapshot path escapes the restore directory.")
                     if member.isdir():
                         destination.mkdir(parents=True, exist_ok=True)
-                        destination.chmod(0o755)
+                        destination.chmod(0o2770)
                     elif member.issym():
                         symlinks.append((destination, member.linkname))
                     else:
@@ -468,7 +503,7 @@ class SnapshotStore:
                             raise SnapshotError("Snapshot file contents are unavailable.")
                         with input_file, destination.open("xb") as output_file:
                             shutil.copyfileobj(input_file, output_file, CHUNK_SIZE)
-                        destination.chmod(0o755 if member.mode & 0o111 else 0o644)
+                        destination.chmod(0o660 | (0o110 if member.mode & 0o111 else 0))
             reader.verify()
 
         for destination, target in symlinks:
@@ -478,11 +513,17 @@ class SnapshotStore:
             os.symlink(target, destination)
 
         for root, directories, files in os.walk(staging, topdown=True, followlinks=False):
-            for name in directories + files:
-                path = Path(root) / name
+            root_path = Path(root)
+            if not root_path.is_symlink():
+                root_path.chmod((root_path.stat().st_mode & 0o770) | 0o2070)
+            for name in directories:
+                path = root_path / name
                 if not path.is_symlink():
-                    self.workspace_storage.owner_setter(path, 10001, 10001)
-            self.workspace_storage.owner_setter(Path(root), 10001, 10001)
+                    path.chmod((path.stat().st_mode & 0o770) | 0o2070)
+            for name in files:
+                path = root_path / name
+                if not path.is_symlink():
+                    path.chmod((path.stat().st_mode & 0o770) | 0o0060)
 
     def recover_restore(self, workspace_id: str) -> None:
         self.workspace_storage.validate_backend()
