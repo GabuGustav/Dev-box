@@ -722,6 +722,7 @@ def test_broker_restore_backup_cleanup_failure_can_be_recovered(
     recovery = broker.api_recover_storage_restore("workspace", workspace_id)
 
     assert recovery["state"] == "recovered"
-    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert (workspace / "restored.txt").read_text(encoding="utf-8") == "restored"
+    assert not (workspace / "previous.txt").exists()
     assert not backup.exists()
     assert not stage.exists()
