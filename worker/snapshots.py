@@ -457,7 +457,7 @@ class SnapshotStore:
                         raise SnapshotError("Snapshot path escapes the restore directory.")
                     if member.isdir():
                         destination.mkdir(parents=True, exist_ok=True)
-                        destination.chmod(0o755)
+                        destination.chmod(0o700)
                     elif member.issym():
                         symlinks.append((destination, member.linkname))
                     else:
@@ -476,12 +476,6 @@ class SnapshotStore:
                 raise SnapshotError("Snapshot symbolic link collides with another entry.")
             os.symlink(target, destination)
 
-        for root, directories, files in os.walk(staging, topdown=True, followlinks=False):
-            for name in directories + files:
-                path = Path(root) / name
-                if not path.is_symlink():
-                    self.workspace_storage.owner_setter(path, 10001, 10001)
-            self.workspace_storage.owner_setter(Path(root), 10001, 10001)
 
     def recover_restore(self, workspace_id: str) -> None:
         self.workspace_storage.validate_backend()
