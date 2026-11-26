@@ -27,7 +27,7 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 - [x] 2.1.2 Replace hard-coded DB credentials with required environment inputs and reject known placeholder values in production configuration.
 - [x] 2.1.3 Preserve a documented local-development path with localhost-only API binding by default.
 - [x] 2.1.4 Document TLS termination at a reverse proxy for non-local deployments.
-- [ ] 2.1.5 Add Compose/configuration tests for secure defaults and missing/placeholder secrets (configuration tests added; CI execution pending).
+- [ ] 2.1.5 Add Compose/configuration tests for secure defaults and missing/placeholder secrets (configuration tests added; first CI run caught one Ruff line-length failure, fixed in the branch; a fresh run is still required).
 
 **Exit:** no public database listener by default; no committed production credentials; secure deployment requirements are executable and documented.
 
@@ -87,5 +87,6 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 ### Investigation
 - [x] Inspected Compose deployment topology, API authentication/ownership, worker Docker/XFS privileges, workspace container settings, snapshot/storage implementation, egress proxy, lifecycle locking, and CI workflow.
 - [x] Created this remediation branch from `phase-2-isolated-workspaces`.
-- [ ] Re-verify the source branch's exact head SHA and latest successful CI run before treating the baseline as release-qualified.
+- [x] Confirm the remediation branch was created from the Phase 2 branch ref; exact base SHA is recorded in PR #1.
+- [ ] Re-verify a green CI run after the lint correction before treating Phase 2.1 as verified.
 - [x] Phase 2.1 implementation edits committed: Compose, environment template, production settings validation, tests, CI trigger/Compose validation, and deployment documentation. Test results are pending; do not treat Phase 2.1 as complete until Actions is green.
