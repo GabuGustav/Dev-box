@@ -341,3 +341,21 @@ def test_legacy_xfs_registry_symlink_is_rejected(tmp_path):
 
     with pytest.raises(WorkspaceStorageError, match="unsafe"):
         storage._migrate_legacy_registry()
+
+
+def test_broker_storage_root_is_group_writable_for_non_root_worker(tmp_path):
+    root = tmp_path / "xfs-workspaces"
+    root.mkdir()
+    owner_calls = []
+    storage = XFSWorkspaceStorage(
+        str(root),
+        "10g",
+        runner=FakeRunner(),
+        owner_setter=lambda path, uid, gid: owner_calls.append((path, uid, gid)),
+        shared_group_id=10001,
+    )
+
+    storage.validate_backend()
+
+    assert owner_calls == [(root, 0, 10001)]
+    assert root.stat().st_mode & 0o7777 == 0o2770
