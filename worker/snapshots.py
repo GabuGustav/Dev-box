@@ -528,6 +528,20 @@ class SnapshotStore:
                         destination.chmod(0o770 if member.mode & 0o111 else 0o660)
             reader.verify()
 
+        symlink_paths = {
+            destination.relative_to(staging).as_posix()
+            for destination, _target in symlinks
+        }
+        for destination, _target in symlinks:
+            relative = destination.relative_to(staging)
+            if any(
+                parent.as_posix() in symlink_paths
+                for parent in relative.parents
+                if parent.as_posix() != "."
+            ):
+                raise SnapshotError(
+                    "Snapshot archive contains a symlink nested beneath another symlink."
+                )
         for destination, target in symlinks:
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() or destination.is_symlink():
