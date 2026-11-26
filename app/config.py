@@ -1,8 +1,8 @@
 from functools import lru_cache
 
 from pydantic import model_validator
-from sqlalchemy.engine import make_url
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -38,7 +38,9 @@ class Settings(BaseSettings):
             if not parsed_database_url.host or not parsed_database_url.password:
                 raise ValueError("Production DATABASE_URL requires a database host and password.")
             if len(parsed_database_url.password) < 24:
-                raise ValueError("Production database password must contain at least 24 characters.")
+                raise ValueError(
+                    "Production database password must contain at least 24 characters."
+                )
             placeholder_credentials = (
                 "devbox:devbox@",
                 "change-me",
