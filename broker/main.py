@@ -39,7 +39,7 @@ docker_client = docker.from_env(timeout=GIT_OPERATION_TIMEOUT_SECONDS + 30)
 
 
 class GitHelperRequest(BaseModel):
-    arguments: list[str] = Field(min_length=1, max_length=24)
+    arguments: list[str] = Field(min_length=1, max_length=110)
     network_enabled: bool = False
 
 
@@ -159,9 +159,12 @@ def validate_git_arguments(arguments: list[str], network_enabled: bool) -> None:
         validate_git_branch(command[2])
     elif len(command) == 3 and command[:2] == ["switch", "--create"]:
         validate_git_branch(command[2])
-    elif len(command) == 9 and command[:6] == [
-        "clone", "--depth", "1", "--single-branch", "--branch", command[5]
-    ] and command[6] == "--" and command[8] == "/workspace":
+    elif (
+        len(command) == 9
+        and command[:5] == ["clone", "--depth", "1", "--single-branch", "--branch"]
+        and command[6] == "--"
+        and command[8] == "/workspace"
+    ):
         validate_git_branch(command[5])
         normalized = validate_git_repository_url(command[7])
         if normalized != command[7]:
@@ -296,9 +299,13 @@ def start_workspace(workspace_id: str) -> dict:
 
 def stop_workspace(workspace_id: str) -> dict:
     container_name, _ = names_for(workspace_id)
+    path = workspace_path_for(workspace_id)
     try:
         container = docker_client.containers.get(container_name)
         container.reload()
+        if not _container_identity_is_valid(container, workspace_id, path):
+            _stop_unsafe_container(container, "workspace identity or storage binding mismatch")
+            raise HTTPException(status_code=409, detail="Workspace container is unsafe.")
         if container.status == "paused":
             container.unpause()
             container.reload()
@@ -312,9 +319,13 @@ def stop_workspace(workspace_id: str) -> dict:
 
 def pause_workspace(workspace_id: str) -> dict:
     container_name, _ = names_for(workspace_id)
+    path = workspace_path_for(workspace_id)
     try:
         container = docker_client.containers.get(container_name)
         container.reload()
+        if not _container_identity_is_valid(container, workspace_id, path):
+            _stop_unsafe_container(container, "workspace identity or storage binding mismatch")
+            raise HTTPException(status_code=409, detail="Workspace container is unsafe.")
         if container.status == "running":
             container.pause()
         container.reload()
@@ -372,10 +383,15 @@ def delete_workspace_container(workspace_id: str) -> dict:
     container_name, _ = names_for(workspace_id)
     try:
         container = docker_client.containers.get(container_name)
+        container.reload()
+        path = workspace_path_for(workspace_id)
+        if not _container_identity_is_valid(container, workspace_id, path):
+            _stop_unsafe_container(container, "workspace identity or storage binding mismatch")
+            raise HTTPException(status_code=409, detail="Workspace container is unsafe.")
         container.remove(force=True, v=True)
     except NotFound:
         pass
-    return _workspace_result(workspace_id)
+    return {**_workspace_result(workspace_id), "state": "deleted"}
 
 
 def list_managed_workspace_ids() -> list[str]:
