@@ -30,8 +30,8 @@ class XFSWorkspaceStorage:
     """Persistent workspace directories with kernel-enforced XFS project quotas.
 
     The storage root must be a dedicated XFS mount with project quota accounting
-    and enforcement enabled. The worker must have permission to issue xfs_quota
-    ioctls against that mount.
+    and enforcement enabled. This implementation is broker-only; the worker uses
+    RemoteWorkspaceStorage and never invokes xfs_quota or owns the project registry.
     """
 
     def __init__(
@@ -123,7 +123,7 @@ class XFSWorkspaceStorage:
                 self.root.chmod(0o2750)
             except OSError as exc:
                 raise WorkspaceStorageError(
-                    "Unable to grant the unprivileged worker group access to storage root."
+                    "Unable to prepare the broker-owned XFS mount root permissions."
                 ) from exc
 
     def _workspace_path(self, workspace_id: str) -> tuple[str, Path]:
