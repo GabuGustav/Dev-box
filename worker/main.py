@@ -320,14 +320,18 @@ def health() -> dict[str, str]:
 )
 @serialize_workspace_operation
 def start_workspace(workspace_id: str) -> dict:
-    container_name, storage_name = names_for(workspace_id)
+    _, storage_name = names_for(workspace_id)
     try:
         snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
     except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     try:
-        container = docker_client.containers.get(container_name)
+        try:
+            container = broker_call(lambda: broker_client.get_workspace(workspace_id))
+        except BrokerNotFound:
+            container = broker_call(lambda: broker_client.start_workspace(workspace_id))
         container.reload()
         mounts = container.attrs.get("Mounts", [])
         workspace_mount = next(
@@ -335,133 +339,10 @@ def start_workspace(workspace_id: str) -> dict:
             None,
         )
         if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+            _stop_unsafe_container(container, "broker returned an unexpected workspace mount")
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    "Existing workspace uses legacy or unexpected storage. "
-                    "Migrate its data before starting it with the XFS backend."
-                ),
-            )
-    except NotFound:
-        container = docker_client.containers.create(
-            image=IMAGE_NAME,
-            name=container_name,
-            command=["sleep", "infinity"],
-            detach=True,
-            user="10001:10001",
-            working_dir="/workspace",
-            environment={"HOME": "/workspace/.home", "TMPDIR": "/tmp"},
-            network_mode="none",
-            ipc_mode="private",
-            volumes={str(workspace_path): {"bind": "/workspace", "mode": "rw"}},
-            mem_limit=WORKSPACE_MEMORY,
-            nano_cpus=int(WORKSPACE_CPU * 1_000_000_000),
-            pids_limit=WORKSPACE_PIDS,
-            read_only=True,
-            cap_drop=["ALL"],
-            security_opt=["no-new-privileges:true"],
-            tmpfs={
-                "/tmp": "rw,noexec,nosuid,size=64m",
-                "/run": "rw,noexec,nosuid,size=16m",
-            },
-            init=True,
-            restart_policy={"Name": "unless-stopped"},
-            labels={"devbox.managed": "true", "devbox.workspace_id": workspace_id},
-        )
-    if container.status == "paused":
-        container.unpause()
-    elif container.status != "running":
-        container.start()
-    container.reload()
-    return {
-        "workspace_id": workspace_id,
-        "container_id": container.id,
-        "storage_ref": storage_name,
-        "state": container.status,
-    }
-
-
-@app.post(
-    "/internal/workspaces/{workspace_id}/stop",
-    dependencies=[Depends(require_service_token)],
-)
-@serialize_workspace_operation
-def stop_workspace(workspace_id: str) -> dict:
-    container_name, volume_name = names_for(workspace_id)
-    try:
-        container = docker_client.containers.get(container_name)
-        container.reload()
-        if container.status == "paused":
-            container.unpause()
-            container.reload()
-        if container.status == "running":
-            container.stop(timeout=10)
-        container.reload()
-        return {
-            "workspace_id": workspace_id,
-            "container_id": container.id,
-            "storage_ref": volume_name,
-            "state": container.status,
-        }
-    except NotFound:
-        return {
-            "workspace_id": workspace_id,
-            "container_id": None,
-            "storage_ref": volume_name,
-            "state": "absent",
-        }
-
-
-@app.post(
-    "/internal/workspaces/{workspace_id}/pause",
-    dependencies=[Depends(require_service_token)],
-)
-@serialize_workspace_operation
-def pause_workspace(workspace_id: str) -> dict:
-    container_name, volume_name = names_for(workspace_id)
-    try:
-        container = docker_client.containers.get(container_name)
-        container.reload()
-        if container.status == "running":
-            container.pause()
-        container.reload()
-        return {
-            "workspace_id": workspace_id,
-            "container_id": container.id,
-            "storage_ref": volume_name,
-            "state": container.status,
-        }
-    except NotFound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="Workspace executor does not exist.",
-        ) from exc
-
-
-@app.post(
-    "/internal/workspaces/{workspace_id}/resume",
-    dependencies=[Depends(require_service_token)],
-)
-@serialize_workspace_operation
-def resume_workspace(workspace_id: str) -> dict:
-    container_name, storage_name = names_for(workspace_id)
-    try:
-        snapshot_store.recover_restore(workspace_id)
-        workspace_path = workspace_storage.ensure_workspace(workspace_id)
-    except (WorkspaceStorageError, SnapshotError) as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    try:
-        container = docker_client.containers.get(container_name)
-        container.reload()
-        mounts = container.attrs.get("Mounts", [])
-        workspace_mount = next(
-            (mount for mount in mounts if mount.get("Destination") == "/workspace"),
-            None,
-        )
-        if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
-            raise HTTPException(
-                status_code=409,
-                detail="Existing workspace is not attached to its assigned XFS storage.",
+                detail="Workspace container is not attached to its assigned storage.",
             )
         if container.status == "paused":
             container.unpause()
@@ -474,11 +355,43 @@ def resume_workspace(workspace_id: str) -> dict:
             "storage_ref": storage_name,
             "state": container.status,
         }
-    except NotFound as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="Workspace executor does not exist.",
-        ) from exc
+    except BrokerNotFound as exc:
+        raise HTTPException(status_code=409, detail="Workspace executor is absent.") from exc
+
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/stop",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def stop_workspace(workspace_id: str) -> dict:
+    names_for(workspace_id)
+    return broker_call(lambda: broker_client.stop_workspace(workspace_id))
+
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/pause",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def pause_workspace(workspace_id: str) -> dict:
+    names_for(workspace_id)
+    return broker_call(lambda: broker_client.pause_workspace(workspace_id))
+
+
+@app.post(
+    "/internal/workspaces/{workspace_id}/resume",
+    dependencies=[Depends(require_service_token)],
+)
+@serialize_workspace_operation
+def resume_workspace(workspace_id: str) -> dict:
+    names_for(workspace_id)
+    try:
+        snapshot_store.recover_restore(workspace_id)
+        workspace_storage.ensure_workspace(workspace_id)
+    except (WorkspaceStorageError, SnapshotError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return broker_call(lambda: broker_client.resume_workspace(workspace_id))
 
 
 @app.post(
