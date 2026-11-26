@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from broker import main as broker
+from worker.storage import WorkspaceStorageError
 
 
 class MissingContainer(Exception):
