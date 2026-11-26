@@ -384,8 +384,6 @@ def test_snapshot_restore_rejects_symlink_parent_chain(tmp_path, monkeypatch):
     workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
     (workspace / "keep.txt").write_text("original", encoding="utf-8")
     snapshot = store.create(WORKSPACE_ID, workspace)
-    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
-
     archive_bytes = io.BytesIO()
     with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
         regular = tarfile.TarInfo("partial.txt")
