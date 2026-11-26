@@ -33,7 +33,7 @@ class Settings(BaseSettings):
             database_url = self.database_url.lower()
             if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
                 raise ValueError("Production requires a PostgreSQL DATABASE_URL.")
-            if "devbox:devbox@" in database_url or "change-me" in database_url:
+            if any(value in database_url for value in ("devbox:devbox@", "change-me", "replace-with-a-unique-random-secret", "local-development-only")):
                 raise ValueError("Production DATABASE_URL contains placeholder credentials.")
         return self
 
