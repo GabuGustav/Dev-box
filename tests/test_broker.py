@@ -202,3 +202,15 @@ def test_git_helper_rejects_non_allowlisted_or_unsafe_operations(
     with pytest.raises(HTTPException) as error:
         broker.validate_git_arguments(arguments, network_enabled)
     assert error.value.status_code == 422
+
+def test_broker_startup_rejects_placeholder_or_short_token(monkeypatch):
+    monkeypatch.setattr(broker, "SERVICE_TOKEN", "replace-this-with-a-different-long-random-secret")
+    with pytest.raises(RuntimeError, match="non-placeholder"):
+        broker.validate_service_token()
+
+    monkeypatch.setattr(broker, "SERVICE_TOKEN", "too-short")
+    with pytest.raises(RuntimeError, match="non-placeholder"):
+        broker.validate_service_token()
+
+    monkeypatch.setattr(broker, "SERVICE_TOKEN", "x" * 48)
+    assert broker.validate_service_token() is None
