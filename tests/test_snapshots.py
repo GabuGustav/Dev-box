@@ -38,6 +38,50 @@ def make_store(tmp_path: Path, *, max_snapshots: int = 10):
     return store, workspace_storage
 
 
+def test_snapshot_metadata_registry_migrates_to_worker_state(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "state.txt").write_text("persistent", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+
+    worker_state = tmp_path / "worker-state"
+    registry = worker_state / "snapshots.sqlite3"
+    migrated = SnapshotStore(
+        store.storage,
+        workspace_storage,
+        secrets.token_urlsafe(32),
+        registry_path=registry,
+    )
+
+    assert registry.is_file()
+    assert store.legacy_registry.is_file()
+    assert migrated.list(WORKSPACE_ID)[0]["snapshot_id"] == snapshot["snapshot_id"]
+    assert registry.stat().st_mode & 0o777 == 0o600
+
+
+def test_snapshot_extract_does_not_require_chown_privilege(tmp_path):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "restored.txt").write_text("group writable", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    stage = workspace.parent / f".{workspace.name}.restore-stage"
+    workspace_storage.prepare_project_directory(
+        WORKSPACE_ID, stage, workspace_storage._project_id(WORKSPACE_ID), 3
+    )
+
+    def deny_chown(*_args):
+        raise PermissionError("worker must not need CAP_CHOWN")
+
+    workspace_storage.owner_setter = deny_chown
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+    store._extract(encrypted_path, WORKSPACE_ID, snapshot["snapshot_id"], stage)
+
+    restored = stage / "restored.txt"
+    assert restored.read_text(encoding="utf-8") == "group writable"
+    assert restored.stat().st_mode & 0o060 == 0o060
+    assert stage.stat().st_mode & 0o2070 == 0o2070
+
+
 def test_snapshot_round_trip_restores_exact_workspace_contents(tmp_path):
     store, workspace_storage = make_store(tmp_path)
     workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
