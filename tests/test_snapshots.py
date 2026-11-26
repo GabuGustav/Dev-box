@@ -44,6 +44,9 @@ def test_snapshot_metadata_registry_migrates_read_only_to_worker_state(tmp_path)
     (workspace / "state.txt").write_text("persistent", encoding="utf-8")
     snapshot = store.create(WORKSPACE_ID, workspace)
     registry = tmp_path / "worker-state" / "snapshots.sqlite3"
+    registry.parent.mkdir()
+    interrupted = registry.with_name(registry.name + ".migrating")
+    interrupted.write_text("partial migration", encoding="utf-8")
 
     migrated = SnapshotStore(
         store.storage,
@@ -53,6 +56,7 @@ def test_snapshot_metadata_registry_migrates_read_only_to_worker_state(tmp_path)
     )
 
     assert registry.is_file()
+    assert not interrupted.exists()
     assert store.legacy_registry.is_file()
     assert migrated.list(WORKSPACE_ID)[0]["snapshot_id"] == snapshot["snapshot_id"]
     assert registry.stat().st_mode & 0o777 == 0o600
