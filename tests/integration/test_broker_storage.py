@@ -60,6 +60,8 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
         workspace_path = Path(
             broker.api_ensure_storage_workspace("workspace", workspace_id)["path"]
         )
+        assert workspace_path.stat().st_gid == 10001
+        assert workspace_path.stat().st_mode & 0o2070 == 0o2070
         broker.api_set_storage_quota(
             "workspace", workspace_id, broker.QuotaRequest(multiplier=1)
         )
