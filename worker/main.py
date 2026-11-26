@@ -10,24 +10,16 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import docker
-from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
+from worker.broker_client import BrokerClient, BrokerNotFound, BrokerRejected, BrokerUnavailable
 from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.executor")
 WORKSPACE_ID_PATTERN = re.compile(r"^dbx_[A-Za-z0-9_-]{20,40}$")
-IMAGE_NAME = os.getenv("DEVBOX_WORKSPACE_IMAGE", "devbox-workspace:0.2")
-WORKSPACE_CPU = float(os.getenv("DEVBOX_WORKSPACE_CPU", "1.0"))
-WORKSPACE_MEMORY = os.getenv("DEVBOX_WORKSPACE_MEMORY", "1g")
-WORKSPACE_PIDS = int(os.getenv("DEVBOX_WORKSPACE_PIDS", "256"))
 SERVICE_TOKEN = os.getenv("DEVBOX_EXECUTOR_TOKEN", "")
-WORKSPACE_IMAGE_CONTEXT = os.getenv(
-    "DEVBOX_WORKSPACE_IMAGE_CONTEXT", "/opt/devbox/workspace-image"
-)
 WORKSPACE_STORAGE_ROOT = os.getenv("DEVBOX_WORKSPACE_STORAGE_ROOT") or "/srv/devbox/workspaces"
 WORKSPACE_DISK_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
 WORKSPACE_INODE_LIMIT = int(os.getenv("DEVBOX_WORKSPACE_INODE_LIMIT", "200000"))
@@ -38,19 +30,13 @@ SNAPSHOT_ENCRYPTION_KEY = os.getenv("DEVBOX_SNAPSHOT_ENCRYPTION_KEY", "")
 SNAPSHOT_MAX_COUNT = int(os.getenv("DEVBOX_SNAPSHOT_MAX_COUNT", "10"))
 SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3)))
 RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))
-GIT_EGRESS_NETWORK = os.getenv("DEVBOX_GIT_EGRESS_NETWORK", "devbox_egress_internal")
-GIT_PROXY_URL = os.getenv("DEVBOX_GIT_PROXY_URL", "http://egress-proxy:3128")
-GIT_OPERATION_TIMEOUT_SECONDS = max(
-    10, min(600, int(os.getenv("DEVBOX_GIT_OPERATION_TIMEOUT_SECONDS", "300")))
-)
-GIT_OUTPUT_LIMIT_BYTES = 64 * 1024
-GIT_ALLOWED_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 workspace_storage = XFSWorkspaceStorage(
     WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA, WORKSPACE_INODE_LIMIT
 )
 snapshot_storage = XFSWorkspaceStorage(
     SNAPSHOT_STORAGE_ROOT, SNAPSHOT_DISK_QUOTA, SNAPSHOT_INODE_LIMIT
 )
+broker_client = BrokerClient()
 snapshot_store = SnapshotStore(
     snapshot_storage,
     workspace_storage,
@@ -147,134 +133,20 @@ def run_git_command(
     *,
     network_enabled: bool = False,
 ) -> str:
-    workspace_path = ensure_git_workspace(workspace_id)
-
-    environment = {
-        "HOME": "/tmp",
-        "TMPDIR": "/tmp",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_PAGER": "cat",
-        "LC_ALL": "C.UTF-8",
-    }
-    network_mode = "none"
-    if network_enabled:
-        network_mode = GIT_EGRESS_NETWORK
-        environment.update(
-            {
-                "HTTP_PROXY": GIT_PROXY_URL,
-                "HTTPS_PROXY": GIT_PROXY_URL,
-                "http_proxy": GIT_PROXY_URL,
-                "https_proxy": GIT_PROXY_URL,
-            }
-        )
-
-    container = None
+    ensure_git_workspace(workspace_id)
     try:
-        container = docker_client.containers.create(
-            image=IMAGE_NAME,
-            command=[
-                "timeout",
-                "--signal=TERM",
-                "--kill-after=5s",
-                f"{GIT_OPERATION_TIMEOUT_SECONDS}s",
-                "git",
-                "--literal-pathspecs",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "core.pager=cat",
-                "-c",
-                "commit.gpgsign=false",
-                *arguments,
-            ],
-            detach=True,
-            user="10001:10001",
-            working_dir="/workspace",
-            environment=environment,
-            network_mode=network_mode,
-            volumes={str(workspace_path): {"bind": "/workspace", "mode": "rw"}},
-            mem_limit="512m",
-            nano_cpus=500_000_000,
-            pids_limit=64,
-            read_only=True,
-            cap_drop=["ALL"],
-            security_opt=["no-new-privileges:true"],
-            tmpfs={
-                "/tmp": "rw,noexec,nosuid,size=64m",
-                "/run": "rw,noexec,nosuid,size=8m",
-            },
-            init=True,
-            labels={
-                "devbox.git_helper": "true",
-                "devbox.workspace_id": workspace_id,
-            },
+        return broker_client.run_git_helper(
+            workspace_id,
+            arguments,
+            network_enabled=network_enabled,
         )
-        container.start()
-        try:
-            result = container.wait(timeout=GIT_OPERATION_TIMEOUT_SECONDS)
-        except Exception as exc:
-            try:
-                container.stop(timeout=0)
-            except Exception:
-                logger.exception("Unable to stop timed-out Git helper")
-            raise HTTPException(
-                status_code=504, detail="Git operation exceeded its time limit."
-            ) from exc
-
-        output = container.logs(stdout=True, stderr=True, stream=True)
-        collected = bytearray()
-        if isinstance(output, bytes):
-            collected.extend(output[-GIT_OUTPUT_LIMIT_BYTES:])
-        else:
-            for chunk in output:
-                remaining = GIT_OUTPUT_LIMIT_BYTES - len(collected)
-                if remaining <= 0:
-                    break
-                collected.extend(chunk[:remaining])
-        decoded = collected.decode("utf-8", errors="replace")
-        if result.get("StatusCode") != 0:
-            raise HTTPException(
-                status_code=422,
-                detail=decoded.strip() or "Git operation failed.",
-            )
-        return decoded.strip()
-    except HTTPException:
-        raise
-    except (APIError, DockerException) as exc:
-        logger.exception(
-            "Git helper could not execute",
-            extra={"workspace_id": workspace_id},
-        )
+    except BrokerRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except BrokerUnavailable as exc:
         raise HTTPException(
-            status_code=503, detail="Git execution service is unavailable."
+            status_code=503,
+            detail="Privileged broker is unavailable.",
         ) from exc
-    finally:
-        if container is not None:
-            try:
-                container.remove(force=True)
-            except Exception:
-                logger.exception(
-                    "Unable to remove temporary Git helper",
-                    extra={"workspace_id": workspace_id},
-                )
-
-
-class LazyDockerClient:
-    """Connect to Docker only when an operation actually needs the daemon."""
-
-    def __init__(self) -> None:
-        self._client = None
-
-    def __getattr__(self, name):
-        if self._client is None:
-            self._client = docker.from_env(timeout=GIT_OPERATION_TIMEOUT_SECONDS + 30)
-        return getattr(self._client, name)
-
-
-docker_client = LazyDockerClient()
-
 
 def require_snapshot_store() -> SnapshotStore:
     return snapshot_store
@@ -317,13 +189,6 @@ def serialize_workspace_operation(function):
             return function(workspace_id, *args, **kwargs)
 
     return wrapped
-
-
-def ensure_image() -> None:
-    try:
-        docker_client.images.get(IMAGE_NAME)
-    except ImageNotFound:
-        docker_client.images.build(path=WORKSPACE_IMAGE_CONTEXT, tag=IMAGE_NAME, rm=True)
 
 
 def _stop_unsafe_container(container, reason: str) -> None:
