@@ -189,3 +189,6 @@ The target architecture separates:
 The broker is a target design, not an implemented component. Its request schema, path derivation, authorization, audit trail, startup/recovery behavior, and failure modes must be reviewed and tested before migration.
 
 The current Compose deployment also publishes PostgreSQL and the plain-HTTP API on host ports. Production deployment must keep PostgreSQL on an internal network and terminate TLS at a trusted reverse proxy. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
+
+
+**PID namespace note:** the workspace runtime relies on Docker's default private PID namespace. The Docker API does not accept `pid_mode="private"`; omitting the setting selects the private default. The Linux integration test verifies that one workspace cannot see another workspace's process marker.
