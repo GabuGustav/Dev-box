@@ -584,6 +584,8 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
             nano_cpus=500_000_000,
             pids_limit=64,
             read_only=True,
+            privileged=False,
+            devices=[],
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
             tmpfs={
