@@ -32,6 +32,43 @@ services:
       - egress_internal
       - egress_public
 
+  broker:
+    restart: unless-stopped
+    depends_on:
+      egress-proxy:
+        condition: service_started
+    build:
+      context: .
+      dockerfile: broker.Dockerfile
+    environment:
+      DEVBOX_BROKER_TOKEN: ${BROKER_SERVICE_TOKEN:?Set BROKER_SERVICE_TOKEN in .env}
+      DEVBOX_WORKSPACE_IMAGE: devbox-workspace:0.2
+      DEVBOX_WORKSPACE_CPU: ${WORKSPACE_CPU_LIMIT:-1.0}
+      DEVBOX_WORKSPACE_MEMORY: ${WORKSPACE_MEMORY_LIMIT:-1g}
+      DEVBOX_WORKSPACE_PIDS: ${WORKSPACE_PIDS_LIMIT:-256}
+      DEVBOX_WORKSPACE_STORAGE_ROOT: ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
+      DEVBOX_WORKSPACE_IMAGE_CONTEXT: /opt/devbox/workspace-image
+      DEVBOX_GIT_EGRESS_NETWORK: devbox_egress_internal
+      DEVBOX_GIT_PROXY_URL: http://egress-proxy:3128
+      DEVBOX_GIT_OPERATION_TIMEOUT_SECONDS: ${GIT_OPERATION_TIMEOUT_SECONDS:-300}
+      DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
+    cap_add:
+      - SYS_ADMIN
+    networks:
+      - default
+      - broker_internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
+      - ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}:${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
+    networks:
+      - broker_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9100/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   worker:
     restart: unless-stopped
     depends_on:
@@ -102,4 +139,7 @@ networks:
     name: devbox_egress_public
   api_proxy:
     name: devbox_api_proxy
+    internal: true
+  broker_internal:
+    name: devbox_broker_internal
     internal: true
