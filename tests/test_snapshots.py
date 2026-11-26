@@ -658,6 +658,48 @@ def test_snapshot_restore_rejects_truncated_member_data(tmp_path, monkeypatch):
     assert not list(workspace.parent.glob(".*.restore-stage"))
 
 
+
+def test_snapshot_restore_rejects_malformed_tar_header(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("safe.txt")
+        member.size = 1
+        archive.addfile(member, io.BytesIO(b"x"))
+    payload = bytearray(archive_bytes.getvalue())
+    payload[148:156] = b"0000000\\0"
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, bytes(payload)
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_malformed_pax_record(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        member = tarfile.TarInfo("safe.txt")
+        member.pax_headers = {"path": "safe.txt"}
+        member.size = 1
+        archive.addfile(member, io.BytesIO(b"x"))
+    payload = bytearray(archive_bytes.getvalue())
+    payload[512:514] = b"99"
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, bytes(payload)
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
 def test_snapshot_restore_rejects_pax_path_override_traversal(tmp_path, monkeypatch):
     archive_bytes = io.BytesIO()
     with tarfile.open(fileobj=archive_bytes, mode="w", format=tarfile.PAX_FORMAT) as archive:
