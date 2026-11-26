@@ -121,6 +121,8 @@ class XFSWorkspaceStorage:
         return (int(digest[:8], 16) & 0x7FFFFFFF) or 1
 
     def _migrate_legacy_registry(self) -> None:
+        if self.registry.is_symlink():
+            raise WorkspaceStorageError("Broker-owned workspace registry is unsafe.")
         if self.registry == self.legacy_registry or self.registry.exists():
             return
         legacy = self.legacy_registry
@@ -146,6 +148,8 @@ class XFSWorkspaceStorage:
             ) from exc
 
     def _connect(self) -> sqlite3.Connection:
+        if self.registry.is_symlink():
+            raise WorkspaceStorageError("Workspace project registry is an unexpected symlink.")
         self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30, isolation_level=None)
         connection.execute(
