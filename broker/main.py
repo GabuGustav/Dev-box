@@ -759,3 +759,111 @@ def internal_ready() -> dict[str, str]:
             detail="Broker dependencies are unavailable.",
         ) from exc
     return {"status": "ready"}
+
+
+def _storage_for(storage_kind: Literal["workspace", "snapshot"]) -> XFSWorkspaceStorage:
+    return storage_backends[storage_kind]
+
+
+def _storage_operation(operation):
+    try:
+        return operation()
+    except WorkspaceStorageError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get(
+    "/internal/storage/{storage_kind}/validate",
+    dependencies=[Depends(require_service_token)],
+)
+def api_validate_storage(
+    storage_kind: Literal["workspace", "snapshot"],
+) -> dict[str, str]:
+    _storage_operation(lambda: _storage_for(storage_kind).validate_backend())
+    return {"storage_kind": storage_kind, "status": "ready"}
+
+
+@app.post(
+    "/internal/storage/{storage_kind}/{workspace_id}/ensure",
+    dependencies=[Depends(require_service_token)],
+)
+def api_ensure_storage_workspace(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+) -> dict[str, str]:
+    directory = _storage_operation(
+        lambda: _storage_for(storage_kind).ensure_workspace(workspace_id)
+    )
+    return {"workspace_id": workspace_id, "path": str(directory)}
+
+
+@app.put(
+    "/internal/storage/{storage_kind}/{workspace_id}/quota",
+    dependencies=[Depends(require_service_token)],
+)
+def api_set_storage_quota(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+    payload: QuotaRequest,
+) -> dict[str, str | int]:
+    _storage_operation(
+        lambda: _storage_for(storage_kind).set_project_quota(
+            workspace_id, multiplier=payload.multiplier
+        )
+    )
+    return {
+        "workspace_id": workspace_id,
+        "storage_kind": storage_kind,
+        "multiplier": payload.multiplier,
+    }
+
+
+@app.post(
+    "/internal/storage/{storage_kind}/{workspace_id}/prepare-restore",
+    dependencies=[Depends(require_service_token)],
+)
+def api_prepare_restore_directory(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+    payload: QuotaRequest,
+) -> dict[str, str]:
+    storage = _storage_for(storage_kind)
+    _, workspace_directory = storage._workspace_path(workspace_id)
+    staging_directory = storage.root / f".{workspace_directory.name}.restore-stage"
+    _storage_operation(
+        lambda: storage.prepare_project_directory(
+            workspace_id,
+            staging_directory,
+            storage._project_id(workspace_id),
+            quota_multiplier=payload.multiplier,
+        )
+    )
+    return {"workspace_id": workspace_id, "path": str(staging_directory)}
+
+
+@app.post(
+    "/internal/storage/{storage_kind}/{workspace_id}/mark-initialized",
+    dependencies=[Depends(require_service_token)],
+)
+def api_mark_storage_initialized(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+) -> dict[str, str]:
+    storage = _storage_for(storage_kind)
+    _, directory = storage._workspace_path(workspace_id)
+    _storage_operation(
+        lambda: storage.mark_workspace_initialized(workspace_id, directory)
+    )
+    return {"workspace_id": workspace_id, "status": "initialized"}
+
+
+@app.delete(
+    "/internal/storage/{storage_kind}/{workspace_id}",
+    dependencies=[Depends(require_service_token)],
+)
+def api_delete_storage_workspace(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+) -> dict[str, str]:
+    _storage_operation(lambda: _storage_for(storage_kind).delete_workspace(workspace_id))
+    return {"workspace_id": workspace_id, "status": "deleted"}
