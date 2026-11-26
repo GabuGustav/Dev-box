@@ -4,7 +4,7 @@
 **Rootless hardening branch:** `phase-2-rootless-worker-hardening`  
 **Rootless base:** `088364d3bffd7fb03bc9010bd1be9057824bffb1`  
 **Base verification:** CI run [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) passed.  
-**Status:** Docker/XFS broker migration verified; rootless-worker storage hardening is implemented on the current branch and awaits CI verification.
+**Status:** Docker/XFS broker migration and rootless-worker storage hardening are implemented and verified. Remaining work is adversarial Git/archive/egress/concurrency testing and final release review.
 
 ## Objective
 
@@ -116,13 +116,13 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 - [x] Drop all worker capabilities, enable `no-new-privileges`, and make the worker root filesystem read-only.
 - [x] Keep Docker socket and XFS authority only in broker.
 - [x] Keep broker inaccessible from untrusted workspace containers.
-- [ ] Verify rootless worker and storage permissions in current-branch CI.
+- [x] Verify rootless worker and storage permissions in current-branch CI (run 45870278489).
 
 ### 2.2.7 — CI and documentation
 - [x] Add broker image/configuration to CI and dedicated Linux XFS/Docker integration coverage.
 - [x] Add rootless Compose identity, worker-state, snapshot migration, and broker restore tests.
 - [x] Update security, architecture, storage, deployment, and roadmap documentation.
-- [ ] Run and inspect current-branch quality and Linux XFS/Docker integration workflows.
+- [x] Run and inspect current-branch quality and Linux XFS/Docker integration workflows (run 45870278489: 174 passed, 7 skipped, 71% coverage; all 7 integration tests passed).
 - [ ] Complete adversarial archive, egress, cross-workspace, and concurrency tests.
 
 ## Rootless shared-storage contract
@@ -150,6 +150,6 @@ This is a transitional trust model: the worker can still read/write all workspac
 
 - CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed the Docker/XFS broker migration: 146 tests passed, five were skipped in the quality job, Ruff and image builds passed, and all five Linux XFS/Docker integration tests passed.
 - CI run [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) passed the latest base Compose validation, image builds, Ruff, unit tests, and Linux XFS/Docker integration.
-- Rootless worker UID/GID separation, non-writable mount roots, snapshot metadata migration, and broker restore swaps are implemented on `phase-2-rootless-worker-hardening`; verification is pending.
+- Rootless worker UID/GID separation, non-writable mount roots, snapshot metadata migration, and broker restore swaps are verified on `phase-2-rootless-worker-hardening` by CI run [45870278489](https://github.com/GabuGustav/Dev-box/actions/runs/45870278489): 174 unit tests passed, seven were skipped in the quality job, Ruff/Compose/all image builds passed, and all seven Linux XFS/Docker integration tests passed.
 
 See [docs/PHASE_2_2_3_ROOTLESS_WORKER.md](PHASE_2_2_3_ROOTLESS_WORKER.md) for the current implementation checklist.
