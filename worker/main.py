@@ -20,8 +20,8 @@ from worker.broker_client import (
     BrokerRejected,
     BrokerUnavailable,
 )
-from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.remote_storage import RemoteWorkspaceStorage
+from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.storage import WorkspaceStorageError
 
 logger = logging.getLogger("devbox.executor")
