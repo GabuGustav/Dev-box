@@ -17,6 +17,7 @@ from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from worker.instance_lock import acquire_file_lock
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.broker")
@@ -33,6 +34,9 @@ SNAPSHOT_STORAGE_ROOT = Path(
 )
 BROKER_STATE_ROOT = Path(
     os.getenv("DEVBOX_BROKER_STATE_ROOT", "/var/lib/devbox-broker")
+)
+BROKER_LOCK_PATH = Path(
+    os.getenv("DEVBOX_BROKER_LOCK_PATH", str(BROKER_STATE_ROOT / "broker.lock"))
 )
 WORKER_STATE_ROOT = Path(
     os.getenv("DEVBOX_WORKER_STATE_ROOT", "/var/lib/devbox-worker")
@@ -679,6 +683,17 @@ async def reconciliation_loop() -> None:
         await asyncio.sleep(max(5, int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))))
 
 
+def prepare_broker_state() -> None:
+    root = BROKER_STATE_ROOT
+    if root.is_symlink():
+        raise RuntimeError("Broker state directory must not be a symlink.")
+    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        raise RuntimeError("Broker state path is not a directory.")
+    os.chown(root, 0, 0)
+    root.chmod(0o700)
+
+
 def prepare_worker_state() -> None:
     if WORKER_STATE_ROOT.is_symlink():
         raise RuntimeError("Worker state root must not be a symbolic link.")
@@ -688,6 +703,7 @@ def prepare_worker_state() -> None:
     os.chown(WORKER_STATE_ROOT, 10002, 10001)
     WORKER_STATE_ROOT.chmod(0o700)
     allowed_files = {
+        "worker.lock",
         "snapshots.sqlite3",
         "snapshots.sqlite3-journal",
         "snapshots.sqlite3-wal",
@@ -733,18 +749,24 @@ def prepare_shared_storage_permissions(storage: XFSWorkspaceStorage) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    validate_service_token()
-    for storage in storage_backends.values():
-        storage.validate_backend()
-        prepare_shared_storage_permissions(storage)
-    prepare_worker_state()
-    ensure_image()
-    reconciler = asyncio.create_task(reconciliation_loop())
+    prepare_broker_state()
+    broker_lock = acquire_file_lock(BROKER_LOCK_PATH, "broker")
+    reconciler = None
     try:
+        validate_service_token()
+        for storage in storage_backends.values():
+            storage.validate_backend()
+            prepare_shared_storage_permissions(storage)
+        prepare_worker_state()
+        ensure_image()
+        reconciler = asyncio.create_task(reconciliation_loop())
         yield
     finally:
-        reconciler.cancel()
-        await asyncio.gather(reconciler, return_exceptions=True)
+        if reconciler is not None:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
+        if broker_lock is not None:
+            broker_lock.close()
 
 
 app = FastAPI(title="DevBox Privileged Broker", version="0.1.0", lifespan=lifespan)
