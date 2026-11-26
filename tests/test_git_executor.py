@@ -23,6 +23,7 @@ class FakeGitBroker:
         self.reconcile_calls += 1
         return self.removed
 
+
 class FakeGitStorage:
     def __init__(self, path):
         self.path = path
@@ -124,6 +125,7 @@ def test_reconciler_delegates_git_helper_cleanup_to_broker(monkeypatch):
     assert removed == 1
     assert fake.reconcile_calls == 1
 
+
 def test_clone_refuses_nonempty_workspace_and_uses_proxy_for_clone(monkeypatch, tmp_path):
     workspace_id = "dbx_abcdefghijklmnopqrstuv"
     calls = []
@@ -200,43 +202,6 @@ def test_git_commit_rejects_path_traversal(monkeypatch, tmp_path):
         )
 
     assert error.value.status_code == 422
-
-
-def test_reconciler_removes_exited_git_helpers_but_keeps_running_helpers(monkeypatch):
-    class Helper:
-        def __init__(self, status):
-            self.status = status
-            self.removed = False
-
-        def reload(self):
-            return None
-
-        def remove(self, force):
-            self.removed = True
-
-    class Containers:
-        def __init__(self, items):
-            self.items = items
-
-        def list(self, **kwargs):
-            assert kwargs == {
-                "all": True,
-                "filters": {"label": "devbox.git_helper=true"},
-            }
-            return self.items
-
-    exited = Helper("exited")
-    running = Helper("running")
-    fake_docker = type(
-        "Docker", (), {"containers": Containers([exited, running])}
-    )()
-    monkeypatch.setattr(executor, "docker_client", fake_docker)
-
-    removed = executor.reconcile_orphaned_git_helpers()
-
-    assert removed == 1
-    assert exited.removed is True
-    assert running.removed is False
 
 
 def test_git_commit_stages_only_requested_relative_paths(monkeypatch, tmp_path):
