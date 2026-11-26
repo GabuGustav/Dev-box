@@ -661,7 +661,12 @@ def prepare_worker_state() -> None:
     WORKER_STATE_ROOT.chmod(0o700)
     for entry in WORKER_STATE_ROOT.iterdir():
         if entry.is_symlink() or not entry.is_file() or entry.name not in {
-            "snapshots.sqlite3", "snapshots.sqlite3.migrating"
+            "snapshots.sqlite3",
+            "snapshots.sqlite3.migrating",
+            "snapshots.sqlite3-journal",
+            "snapshots.sqlite3-wal",
+            "snapshots.sqlite3-shm",
+            "snapshots.sqlite3.migrating-journal",
         }:
             raise RuntimeError("Worker state contains an unexpected entry.")
         os.chown(entry, 10002, 10001)
