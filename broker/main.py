@@ -694,6 +694,13 @@ def prepare_broker_state() -> None:
         raise RuntimeError("Broker state path is not a directory.")
     os.chown(root, 0, 0)
     root.chmod(0o700)
+    if BROKER_LOCK_PATH.is_symlink() or (
+        BROKER_LOCK_PATH.exists() and not BROKER_LOCK_PATH.is_file()
+    ):
+        raise RuntimeError("Broker lock path must be a regular file.")
+    if BROKER_LOCK_PATH.exists():
+        os.chown(BROKER_LOCK_PATH, 0, 0)
+        BROKER_LOCK_PATH.chmod(0o600)
 
 
 def prepare_worker_state() -> None:
