@@ -500,15 +500,42 @@ def reconcile_orphaned_git_helpers() -> int:
 def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
     validate_git_arguments(request.arguments, request.network_enabled)
     path = workspace_path_for(workspace_id)
+    is_clone = request.arguments[0] == "clone"
+    if not is_clone:
+        git_directory = path / ".git"
+        if git_directory.is_symlink() or not git_directory.is_dir():
+            raise HTTPException(status_code=409, detail="Workspace Git metadata is missing or unsafe.")
     environment = {
         "HOME": "/tmp",
         "TMPDIR": "/tmp",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "SSH_ASKPASS": "/bin/false",
         "GIT_PAGER": "cat",
+        "GIT_ALLOW_PROTOCOL": "https",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
         "LC_ALL": "C.UTF-8",
     }
+    if not is_clone:
+        environment.update({"GIT_DIR": "/workspace/.git", "GIT_WORK_TREE": "/workspace"})
+    git_config = [
+        "-c", "core.hooksPath=/dev/null",
+        "-c", "core.fsmonitor=false",
+        "-c", "core.pager=cat",
+        "-c", "core.sshCommand=/bin/false",
+        "-c", "credential.helper=",
+        "-c", "credential.interactive=false",
+        "-c", "protocol.file.allow=never",
+        "-c", "protocol.ext.allow=never",
+        "-c", "protocol.ssh.allow=never",
+        "-c", "protocol.git.allow=never",
+        "-c", "submodule.recurse=false",
+        "-c", "fetch.recurseSubmodules=false",
+        "-c", "commit.gpgsign=false",
+    ]
     network_mode = "none"
     if request.network_enabled:
         network_mode = GIT_EGRESS_NETWORK
@@ -520,6 +547,9 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
                 "https_proxy": GIT_PROXY_URL,
             }
         )
+        git_config.extend(["-c", f"http.proxy={GIT_PROXY_URL}"])
+    else:
+        git_config.extend(["-c", "http.proxy="])
     container = None
     try:
         container = docker_client.containers.create(
@@ -530,13 +560,9 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
                 "--kill-after=5s",
                 f"{GIT_OPERATION_TIMEOUT_SECONDS}s",
                 "git",
+                "--no-pager",
                 "--literal-pathspecs",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "core.pager=cat",
-                "-c",
-                "commit.gpgsign=false",
+                *git_config,
                 *request.arguments,
             ],
             detach=True,
