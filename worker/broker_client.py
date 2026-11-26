@@ -189,6 +189,20 @@ class BrokerClient:
             f"/internal/storage/{storage_kind}/{workspace_id}/mark-initialized",
         )
 
+    def recover_storage_restore(
+        self, storage_kind: str, workspace_id: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST", f"/internal/storage/{storage_kind}/{workspace_id}/recover-restore"
+        )
+
+    def commit_storage_restore(
+        self, storage_kind: str, workspace_id: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST", f"/internal/storage/{storage_kind}/{workspace_id}/commit-restore"
+        )
+
     def delete_storage_workspace(
         self, storage_kind: str, workspace_id: str
     ) -> dict[str, Any]:
