@@ -74,10 +74,10 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 **Exit:** broker protocol has no arbitrary Docker API payloads, host paths, shell commands, image references, devices, capabilities, or mount definitions.
 
 ### 2.2.2 — Broker service and private transport
-- [ ] Add a dedicated broker service/image and internal-only Compose network.
-- [ ] Add a broker-only service token distinct from the worker/API token; compare secrets in constant time.
+- [x] Add a dedicated broker service/image and internal-only Compose network.
+- [x] Add a broker-only service token distinct from the worker/API token; compare secrets in constant time.
 - [ ] Enforce request body limits and strict schemas; do not log tokens, Git output, or file contents.
-- [ ] Add health/readiness checks and safe startup ordering.
+- [x] Add broker health/readiness check and startup token validation.
 - [ ] Ensure no port is published to the host.
 
 **Exit:** only the worker can reach the broker on its private network; unauthorized, malformed, oversized, and unknown requests fail closed.
@@ -140,8 +140,10 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 ## Progress log
 
 - [x] Source inventory: `worker/main.py`, `worker/storage.py`, `worker/snapshots.py`, `docker-compose.yml`, `worker.Dockerfile`, and related tests inspected.
-- [ ] Broker API design reviewed and implemented.
-- [ ] No code changes made in this branch yet.
+- [ ] Broker API design reviewed and fully integrated. Initial broker endpoints, Git command allowlist, service-token validation, Docker lifecycle methods, and unit tests are implemented; the worker still uses Docker directly and the XFS operations are not migrated.
+- [x] Added broker package, FastAPI service, dedicated Docker image, internal Compose network, separate broker token, and unit tests for authorization, path validation, fixed workspace container configuration, Git command allowlisting, and idempotent stop behavior.
+- [ ] Broker service has not yet been connected to worker routes; worker still mounts Docker socket and has `CAP_SYS_ADMIN`.
+- [ ] XFS quota operations are still executed directly by worker; privilege removal is not complete.
 
 
 ## Detailed implementation architecture
