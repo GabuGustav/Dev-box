@@ -1,6 +1,7 @@
 import errno
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from uuid import uuid4
 
@@ -54,6 +55,7 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
     workspace_id = new_workspace_id()
     snapshot_id = new_workspace_id()
     stage = None
+    backup = None
 
     try:
         assert broker.api_validate_storage("workspace")["status"] == "ready"
@@ -84,6 +86,25 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
         )
         stage = Path(prepared["path"])
         assert stage.is_dir()
+        backup = workspace_path.parent / f".{workspace_path.name}.restore-backup"
+        swap_script = (
+            "import os, shutil; "
+            f"os.replace({str(workspace_path)!r}, {str(backup)!r}); "
+            f"os.replace({str(stage)!r}, {str(workspace_path)!r}); "
+            f"shutil.rmtree({str(backup)!r})"
+        )
+        subprocess.run(
+            [
+                "setpriv",
+                "--reuid=10001",
+                "--regid=10001",
+                "--clear-groups",
+                "python3",
+                "-c",
+                swap_script,
+            ],
+            check=True,
+        )
         broker.api_mark_storage_initialized("workspace", workspace_id)
 
         snapshot_path = Path(
@@ -98,5 +119,7 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
     finally:
         if stage and stage.exists():
             shutil.rmtree(stage)
+        if backup and backup.exists():
+            shutil.rmtree(backup)
         broker.api_delete_storage_workspace("workspace", workspace_id)
         broker.api_delete_storage_workspace("snapshot", snapshot_id)
