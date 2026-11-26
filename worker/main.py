@@ -13,7 +13,6 @@ from urllib.parse import urlsplit
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
-from worker.instance_lock import acquire_file_lock
 from worker.broker_client import (
     BrokerClient,
     BrokerError,
@@ -21,6 +20,7 @@ from worker.broker_client import (
     BrokerRejected,
     BrokerUnavailable,
 )
+from worker.instance_lock import acquire_file_lock
 from worker.remote_storage import RemoteWorkspaceStorage
 from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.storage import WorkspaceStorageError
@@ -45,6 +45,8 @@ WORKER_LOCK_PATH = Path(
     os.getenv("DEVBOX_WORKER_LOCK_PATH", str(SNAPSHOT_REGISTRY_PATH.with_name("worker.lock")))
 )
 WORKER_LOCK_ENABLED = os.getenv("DEVBOX_WORKER_LOCK_ENABLED", "0") == "1"
+if WORKER_LOCK_PATH.parent != SNAPSHOT_REGISTRY_PATH.parent:
+    raise RuntimeError("Worker lock and snapshot registry must share the worker-state volume.")
 WORKER_LOCK_HANDLE = (
     acquire_file_lock(WORKER_LOCK_PATH, "worker") if WORKER_LOCK_ENABLED else None
 )
