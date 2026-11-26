@@ -45,8 +45,11 @@ WORKER_LOCK_PATH = Path(
     os.getenv("DEVBOX_WORKER_LOCK_PATH", str(SNAPSHOT_REGISTRY_PATH.with_name("worker.lock")))
 )
 WORKER_LOCK_ENABLED = os.getenv("DEVBOX_WORKER_LOCK_ENABLED", "0") == "1"
-if WORKER_LOCK_PATH.parent != SNAPSHOT_REGISTRY_PATH.parent:
-    raise RuntimeError("Worker lock and snapshot registry must share the worker-state volume.")
+if (
+    WORKER_LOCK_PATH.parent != SNAPSHOT_REGISTRY_PATH.parent
+    or WORKER_LOCK_PATH.name != "worker.lock"
+):
+    raise RuntimeError("Worker lock must be worker.lock in the worker-state volume.")
 WORKER_LOCK_HANDLE = (
     acquire_file_lock(WORKER_LOCK_PATH, "worker") if WORKER_LOCK_ENABLED else None
 )
