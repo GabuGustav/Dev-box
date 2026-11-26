@@ -480,7 +480,7 @@ def test_broker_rejects_lock_outside_broker_state(tmp_path, monkeypatch):
     monkeypatch.setattr(broker, "BROKER_STATE_ROOT", state)
     monkeypatch.setattr(broker, "BROKER_LOCK_PATH", tmp_path / "broker.lock")
 
-    with pytest.raises(RuntimeError, match="must be stored in the broker-state volume"):
+    with pytest.raises(RuntimeError, match="must be broker.lock in the broker-state volume"):
         broker.prepare_broker_state()
 
 
@@ -701,8 +701,12 @@ def test_broker_restore_backup_cleanup_failure_can_be_recovered(
     backup = tmp_path / f".{workspace.name}.restore-backup"
     real_rmtree = broker.shutil.rmtree
 
+    cleanup_failures_remaining = 1
+
     def fail_backup_cleanup(path, *args, **kwargs):
-        if path == backup:
+        nonlocal cleanup_failures_remaining
+        if path == backup and cleanup_failures_remaining:
+            cleanup_failures_remaining -= 1
             raise OSError("injected backup cleanup failure")
         return real_rmtree(path, *args, **kwargs)
 
