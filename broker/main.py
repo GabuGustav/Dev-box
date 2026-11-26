@@ -659,15 +659,19 @@ def prepare_worker_state() -> None:
         raise RuntimeError("Worker state root must be a directory.")
     os.chown(WORKER_STATE_ROOT, 10002, 10001)
     WORKER_STATE_ROOT.chmod(0o700)
+    allowed_files = {
+        "snapshots.sqlite3",
+        "snapshots.sqlite3-journal",
+        "snapshots.sqlite3-wal",
+        "snapshots.sqlite3-shm",
+    }
     for entry in WORKER_STATE_ROOT.iterdir():
-        if entry.is_symlink() or not entry.is_file() or entry.name not in {
-            "snapshots.sqlite3",
-            "snapshots.sqlite3.migrating",
-            "snapshots.sqlite3-journal",
-            "snapshots.sqlite3-wal",
-            "snapshots.sqlite3-shm",
-            "snapshots.sqlite3.migrating-journal",
-        }:
+        if entry.is_symlink() or not entry.is_file():
+            raise RuntimeError("Worker state contains an unexpected entry.")
+        if entry.name.startswith("snapshots.sqlite3.migrating"):
+            entry.unlink()
+            continue
+        if entry.name not in allowed_files:
             raise RuntimeError("Worker state contains an unexpected entry.")
         os.chown(entry, 10002, 10001)
         entry.chmod(0o600)
@@ -685,8 +689,18 @@ def prepare_shared_storage_permissions(storage: XFSWorkspaceStorage) -> None:
     if legacy_metadata.exists() or legacy_metadata.is_symlink():
         if legacy_metadata.is_symlink() or not legacy_metadata.is_file():
             raise RuntimeError("Legacy snapshot metadata registry is unsafe.")
+        journal = legacy_metadata.with_name(legacy_metadata.name + "-journal")
+        if journal.exists() or journal.is_symlink():
+            raise RuntimeError("Legacy snapshot metadata has an unfinished SQLite journal.")
         os.chown(legacy_metadata, 0, 10001)
         legacy_metadata.chmod(0o640)
+        for suffix in ("-wal", "-shm"):
+            sidecar = legacy_metadata.with_name(legacy_metadata.name + suffix)
+            if sidecar.exists() or sidecar.is_symlink():
+                if sidecar.is_symlink() or not sidecar.is_file():
+                    raise RuntimeError("Legacy snapshot metadata sidecar is unsafe.")
+                os.chown(sidecar, 0, 10001)
+                sidecar.chmod(0o640)
 
 
 @asynccontextmanager
