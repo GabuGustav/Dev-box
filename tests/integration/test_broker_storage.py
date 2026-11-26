@@ -32,12 +32,14 @@ def make_backends():
         "16m",
         inode_limit=1000,
         registry_path=BROKER_STATE_ROOT / "workspace-projects.sqlite3",
+        shared_group_id=10001,
     )
     snapshot = XFSWorkspaceStorage(
         SNAPSHOT_ROOT,
         "32m",
         inode_limit=2000,
         registry_path=BROKER_STATE_ROOT / "snapshot-projects.sqlite3",
+        shared_group_id=10001,
     )
     return workspace, snapshot
 
