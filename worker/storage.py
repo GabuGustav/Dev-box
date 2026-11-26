@@ -42,6 +42,7 @@ class XFSWorkspaceStorage:
         *,
         runner=subprocess.run,
         owner_setter=_set_owner,
+        registry_path: str | Path | None = None,
     ) -> None:
         # Storage is provisioned on Linux, but importing/configuring the worker on
         # Windows must still accept its POSIX deployment paths. Also accept native
@@ -61,7 +62,10 @@ class XFSWorkspaceStorage:
         self.inode_limit = inode_limit
         self.runner = runner
         self.owner_setter = owner_setter
-        self.registry = self.root / ".devbox-storage.sqlite3"
+        self.legacy_registry = self.root / ".devbox-storage.sqlite3"
+        self.registry = Path(registry_path) if registry_path else self.legacy_registry
+        if not self.registry.is_absolute():
+            raise WorkspaceStorageError("Workspace registry path must be absolute.")
 
     def _run(self, *args: str) -> str:
         try:
@@ -116,7 +120,33 @@ class XFSWorkspaceStorage:
         digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()
         return (int(digest[:8], 16) & 0x7FFFFFFF) or 1
 
+    def _migrate_legacy_registry(self) -> None:
+        if self.registry == self.legacy_registry or self.registry.exists():
+            return
+        legacy = self.legacy_registry
+        if not legacy.exists():
+            return
+        if legacy.is_symlink() or not legacy.is_file():
+            raise WorkspaceStorageError("Legacy workspace registry is unsafe.")
+        try:
+            self.registry.parent.mkdir(parents=True, exist_ok=True)
+            source = sqlite3.connect(legacy)
+            destination = sqlite3.connect(self.registry)
+            try:
+                source.backup(destination)
+                destination.commit()
+            finally:
+                destination.close()
+                source.close()
+            self.registry.chmod(0o600)
+            legacy.unlink()
+        except (OSError, sqlite3.Error) as exc:
+            raise WorkspaceStorageError(
+                "Unable to migrate the workspace project registry to broker-owned storage."
+            ) from exc
+
     def _connect(self) -> sqlite3.Connection:
+        self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30, isolation_level=None)
         connection.execute(
             """CREATE TABLE IF NOT EXISTS workspace_projects (
@@ -232,6 +262,8 @@ class XFSWorkspaceStorage:
     def ensure_workspace(self, workspace_id: str) -> Path:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
+        self._migrate_legacy_registry()
+        self._migrate_legacy_registry()
         if not self.registry.exists():
             unexpected_entries = [
                 entry
@@ -366,6 +398,7 @@ class XFSWorkspaceStorage:
     def delete_workspace(self, workspace_id: str) -> None:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
+        self._migrate_legacy_registry()
         if not self.registry.exists():
             if directory.exists() or directory.is_symlink():
                 raise WorkspaceStorageError(
