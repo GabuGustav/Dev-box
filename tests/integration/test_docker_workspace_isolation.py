@@ -1,10 +1,19 @@
 import os
+from pathlib import Path
 from uuid import uuid4
 
 import docker
 import pytest
 
 from worker.storage import XFSWorkspaceStorage
+
+BROKER_STATE_ROOT = Path(os.getenv("DEVBOX_TEST_BROKER_STATE_ROOT", "/tmp/devbox-broker-state"))
+
+
+def broker_registry(name: str) -> Path:
+    BROKER_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    return BROKER_STATE_ROOT / name
+
 
 XFS_TEST_ROOT = os.getenv("DEVBOX_TEST_XFS_ROOT")
 DOCKER_INTEGRATION = os.getenv("DEVBOX_RUN_DOCKER_INTEGRATION") == "1"
@@ -44,7 +53,12 @@ def test_workspace_mount_is_private_and_survives_container_replacement():
     except docker.errors.DockerException as exc:
         pytest.skip(f"Docker daemon unavailable: {exc}")
 
-    storage = XFSWorkspaceStorage(XFS_TEST_ROOT, "128m", inode_limit=5000)
+    storage = XFSWorkspaceStorage(
+        XFS_TEST_ROOT,
+        "128m",
+        inode_limit=5000,
+        registry_path=broker_registry("workspace-projects.sqlite3"),
+    )
     first_id = new_workspace_id()
     second_id = new_workspace_id()
     created = []
