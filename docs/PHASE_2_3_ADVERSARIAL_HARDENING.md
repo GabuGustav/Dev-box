@@ -59,8 +59,8 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Test normalized duplicate paths, file/directory collisions, symlink-parent paths, absolute paths, traversal, hard links, devices, and FIFOs.
 - [x] Reject symlink entries whose ancestor path is another symlink before creating any symlinks.
 - [x] Test expanded-size and entry-count limits, truncated member data, PAX path-override traversal, and authenticated-ciphertext tampering.
-- [ ] Add malformed tar-header and malformed PAX-record tests; distinguish malformed metadata from valid PAX metadata that specifies an unsafe path.
-- [ ] Complete restore fault injection for stage creation and old-tree backup rename. Existing tests cover extraction rejection/cleanup, stage swap rollback, registry identity refresh failure, quota reset failure, backup cleanup retry, and recovery idempotency.
+- [x] Add malformed tar-header and malformed PAX-record tests; distinguish malformed metadata from valid PAX metadata that specifies an unsafe path.
+- [x] Complete restore fault injection for stage creation, extraction, old-tree backup rename, stage swap, registry identity refresh, quota reset, and backup cleanup. Recovery tests verify the old tree survives pre-swap failures and the committed restored tree survives cleanup-only failure.
 - [x] Prove recovery is idempotent and preserves either the previous complete tree or the restored complete tree; never expose a partial workspace (unit tests and Linux XFS/Docker integration passed).
 - [ ] Add property-based tests if the existing dependency set supports them without a heavy runtime dependency.
 
@@ -115,7 +115,8 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Container profile assertions added; cross-workspace integration coverage retained.
 - [x] Single-instance locks and lock-registry cleanup implemented.
 - [x] Full CI verification (run 45907271567: both quality and Linux XFS/Docker jobs passed; 201 passed, 8 skipped).
-- [ ] Remaining restore fault-injection coverage and property-based fuzzing.
+- [x] Remaining restore fault-injection coverage completed: stage-creation partial failure and old-tree backup rename failure are now injected in unit tests; malformed tar headers and malformed PAX records are rejected.
+- [ ] Evaluate a dev-only property-based testing dependency and add archive-path fuzz properties if the added maintenance cost is justified.
 - [x] Fix run 45874767681 Ruff failures: wrap the two overlong test lines, normalize import spacing, and replace mutating import auto-fix in CI with non-mutating repository-wide Ruff checks.
 - [x] Address run 45906814016 unit-test findings: explicitly disable privilege and devices for Git helper containers, align the lock-path test with the implementation's precise error, and make the restore cleanup fault injection fail once so the recovery retry can be exercised.
 - [x] Correct the cleanup-recovery assertion after run 45907106869: once the staged tree has been swapped into the live workspace, recovery preserves that restored tree and removes the stale backup; the old tree is not rolled back after a cleanup-only failure. Verified in run 45907271567.
