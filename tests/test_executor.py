@@ -316,7 +316,7 @@ def test_reconciliation_stops_workspace_when_storage_is_unavailable(monkeypatch,
 
 
 def test_workspace_status_reports_broker_state(monkeypatch, tmp_path):
-    workspace_id, storage_path, _, _, broker = configure_worker(monkeypatch, tmp_path)
+    workspace_id, _, _, _, broker = configure_worker(monkeypatch, tmp_path)
     container = broker.start_workspace(workspace_id)
 
     result = executor.get_workspace_status(workspace_id)
