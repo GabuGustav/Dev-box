@@ -706,3 +706,11 @@ def api_run_git_helper(workspace_id: str, payload: GitHelperRequest) -> dict:
 )
 def api_reconcile_git_helpers() -> dict:
     return {"removed": reconcile_orphaned_git_helpers()}
+
+
+@app.get(
+    "/internal/ready",
+    dependencies=[Depends(require_service_token)],
+)
+def internal_ready() -> dict[str, str]:
+    return {"status": "ready"}
