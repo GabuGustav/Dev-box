@@ -50,8 +50,16 @@ class BrokerClient:
                 "DEVBOX_BROKER_TOKEN must be a unique non-placeholder secret of at least 32 characters."
             )
         parsed = httpx.URL(self.base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.host:
-            raise RuntimeError("DEVBOX_BROKER_URL must be an absolute HTTP(S) URL.")
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.host
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise RuntimeError("DEVBOX_BROKER_URL must be a clean absolute HTTP(S) URL.")
 
     def close(self) -> None:
         self._client.close()
