@@ -522,6 +522,8 @@ def test_git_helper_overrides_repository_local_executable_configuration(tmp_path
     assert fake_docker.containers.kwargs["network_mode"] == "none"
     assert fake_docker.containers.kwargs["cap_drop"] == ["ALL"]
     assert fake_docker.containers.kwargs["read_only"] is True
+    assert "no-new-privileges:true" in fake_docker.containers.kwargs["security_opt"]
+    assert fake_docker.containers.kwargs["privileged"] is False
     assert output == "helper ok"
     assert fake_docker.containers.container.removed is True
 
