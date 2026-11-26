@@ -517,7 +517,10 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
                 container.stop(timeout=0)
             except Exception:
                 logger.exception("Unable to stop timed-out Git helper")
-            raise HTTPException(status_code=504, detail="Git operation exceeded its time limit.") from exc
+            raise HTTPException(
+                status_code=504,
+                detail="Git operation exceeded its time limit.",
+            ) from exc
         output = container.logs(stdout=True, stderr=True, stream=True)
         collected = bytearray()
         if isinstance(output, bytes):
@@ -535,7 +538,9 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
     except HTTPException:
         raise
     except (APIError, DockerException) as exc:
-        logger.exception("Git helper could not execute", extra={"workspace_id": workspace_id})
+        logger.exception(
+            "Git helper could not execute", extra={"workspace_id": workspace_id}
+        )
         raise HTTPException(status_code=503, detail="Git execution service is unavailable.") from exc
     finally:
         if container is not None:
