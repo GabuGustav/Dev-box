@@ -441,3 +441,137 @@ def test_broker_initializes_worker_state_with_restricted_permissions(tmp_path, m
 
     assert state.is_dir()
     assert state.stat().st_mode & 0o777 == 0o700
+
+
+class FakeGitHelperContainer:
+    def __init__(self):
+        self.removed = False
+
+    def start(self):
+        return None
+
+    def wait(self, timeout=None):
+        return {"StatusCode": 0}
+
+    def logs(self, **_kwargs):
+        return b"helper ok"
+
+    def remove(self, force=False):
+        self.removed = True
+
+
+class FakeGitHelperContainers:
+    def __init__(self):
+        self.container = FakeGitHelperContainer()
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return self.container
+
+
+class FakeGitHelperDocker:
+    def __init__(self):
+        self.containers = FakeGitHelperContainers()
+
+
+def test_git_helper_overrides_repository_local_executable_configuration(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    workspace_root = tmp_path / "workspaces"
+    digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
+    workspace = workspace_root / digest
+    (workspace / ".git").mkdir(parents=True)
+    fake_docker = FakeGitHelperDocker()
+    monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
+    monkeypatch.setattr(broker, "docker_client", fake_docker)
+
+    output = broker.run_git_helper(
+        workspace_id,
+        broker.GitHelperRequest(
+            arguments=["status", "--short", "--branch"],
+            network_enabled=False,
+        ),
+    )
+
+    command = fake_docker.containers.kwargs["command"]
+    environment = fake_docker.containers.kwargs["environment"]
+    expected_config = {
+        "core.hooksPath=/dev/null",
+        "core.fsmonitor=false",
+        "core.sshCommand=/bin/false",
+        "credential.helper=",
+        "credential.interactive=false",
+        "protocol.file.allow=never",
+        "protocol.ext.allow=never",
+        "protocol.ssh.allow=never",
+        "protocol.git.allow=never",
+        "submodule.recurse=false",
+        "fetch.recurseSubmodules=false",
+        "commit.gpgsign=false",
+        "http.proxy=",
+    }
+    actual_config = {
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "-c"
+    }
+    assert expected_config <= actual_config
+    assert environment["GIT_ALLOW_PROTOCOL"] == "https"
+    assert environment["GIT_DIR"] == "/workspace/.git"
+    assert environment["GIT_WORK_TREE"] == "/workspace"
+    assert fake_docker.containers.kwargs["network_mode"] == "none"
+    assert fake_docker.containers.kwargs["cap_drop"] == ["ALL"]
+    assert fake_docker.containers.kwargs["read_only"] is True
+    assert output == "helper ok"
+    assert fake_docker.containers.container.removed is True
+
+
+def test_git_fetch_helper_forces_restricted_proxy_and_https_protocol(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    workspace_root = tmp_path / "workspaces"
+    digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
+    (workspace_root / digest / ".git").mkdir(parents=True)
+    fake_docker = FakeGitHelperDocker()
+    monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
+    monkeypatch.setattr(broker, "docker_client", fake_docker)
+
+    broker.run_git_helper(
+        workspace_id,
+        broker.GitHelperRequest(
+            arguments=["fetch", "--prune", "origin"],
+            network_enabled=True,
+        ),
+    )
+
+    command = fake_docker.containers.kwargs["command"]
+    environment = fake_docker.containers.kwargs["environment"]
+    assert "http.proxy=http://egress-proxy:3128" in command
+    assert environment["GIT_ALLOW_PROTOCOL"] == "https"
+    assert environment["HTTPS_PROXY"] == broker.GIT_PROXY_URL
+    assert fake_docker.containers.kwargs["network_mode"] == broker.GIT_EGRESS_NETWORK
+
+
+def test_git_helper_rejects_symlinked_git_metadata(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    workspace_root = tmp_path / "workspaces"
+    digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
+    workspace = workspace_root / digest
+    workspace.mkdir(parents=True)
+    outside = tmp_path / "outside-git"
+    outside.mkdir()
+    (workspace / ".git").symlink_to(outside, target_is_directory=True)
+    fake_docker = FakeGitHelperDocker()
+    monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
+    monkeypatch.setattr(broker, "docker_client", fake_docker)
+
+    with pytest.raises(HTTPException) as error:
+        broker.run_git_helper(
+            workspace_id,
+            broker.GitHelperRequest(
+                arguments=["status", "--short", "--branch"],
+                network_enabled=False,
+            ),
+        )
+
+    assert error.value.status_code == 409
+    assert fake_docker.containers.kwargs is None
