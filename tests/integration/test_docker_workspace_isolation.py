@@ -89,7 +89,8 @@ def test_workspace_mount_is_private_and_survives_container_replacement():
             "from pathlib import Path; "
             "p=Path('/workspace/escape/private.txt'); "
             "assert not p.exists(); "
-            "exec(\"try:\\n p.read_text()\\n raise AssertionError('cross-workspace read succeeded')\\n"
+            "exec(\"try:\\n p.read_text()\\n "
+            "raise AssertionError('cross-workspace read succeeded')\\n"
             "except OSError:\\n pass\")",
         )
         assert output == b""
