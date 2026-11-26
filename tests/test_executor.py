@@ -14,6 +14,8 @@ class FakeBrokerContainer:
         self.status = status
         self.stopped = False
         self.started = False
+        self.pause_calls = 0
+        self.unpause_calls = 0
         self.attrs = {
             "Config": {
                 "Labels": {
@@ -36,9 +38,11 @@ class FakeBrokerContainer:
         self.status = "exited"
 
     def pause(self):
+        self.pause_calls += 1
         self.status = "paused"
 
     def unpause(self):
+        self.unpause_calls += 1
         self.status = "running"
 
 
@@ -271,7 +275,8 @@ def test_snapshot_pauses_and_resumes_running_workspace(monkeypatch, tmp_path):
 
     assert result["snapshot_id"] == "snap-1"
     assert snapshots.created == [workspace_id]
-    assert broker.paused == [workspace_id]
+    assert container.pause_calls == 1
+    assert container.unpause_calls == 1
     assert container.status == "running"
 
 
