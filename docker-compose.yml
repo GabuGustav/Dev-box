@@ -71,11 +71,15 @@ services:
     depends_on:
       egress-proxy:
         condition: service_started
+      broker:
+        condition: service_healthy
     build:
       context: .
       dockerfile: worker.Dockerfile
     environment:
       DEVBOX_EXECUTOR_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
+      DEVBOX_BROKER_URL: http://broker:9100
+      DEVBOX_BROKER_TOKEN: ${BROKER_SERVICE_TOKEN:?Set BROKER_SERVICE_TOKEN in .env}
       DEVBOX_WORKSPACE_IMAGE: devbox-workspace:0.2
       DEVBOX_WORKSPACE_CPU: ${WORKSPACE_CPU_LIMIT:-1.0}
       DEVBOX_WORKSPACE_MEMORY: ${WORKSPACE_MEMORY_LIMIT:-1g}
@@ -99,7 +103,6 @@ services:
       - default
       - broker_internal
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
       - ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}:${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
     healthcheck:
