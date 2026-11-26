@@ -39,15 +39,13 @@ class Settings(BaseSettings):
                 raise ValueError("Production DATABASE_URL requires a database host and password.")
             if len(parsed_database_url.password) < 24:
                 raise ValueError("Production database password must contain at least 24 characters.")
-            if any(
-                value in database_url
-                for value in (
-                    "devbox:devbox@",
-                    "change-me",
-                    "replace-with-a-unique-random-secret",
-                    "local-development-only",
-                )
-            ):
+            placeholder_credentials = (
+                "devbox:devbox@",
+                "change-me",
+                "replace-with-a-unique-random-secret",
+                "local-development-only",
+            )
+            if any(value in database_url for value in placeholder_credentials):
                 raise ValueError("Production DATABASE_URL contains placeholder credentials.")
         return self
 
