@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Callable
 
 from worker.broker_client import BrokerClient, BrokerError
 from worker.storage import QUOTA_PATTERN, WORKSPACE_ID_PATTERN, WorkspaceStorageError, _set_owner
