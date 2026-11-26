@@ -918,6 +918,7 @@ def api_recover_storage_restore(
         if stage.exists():
             shutil.rmtree(stage)
         if workspace.exists():
+            storage.mark_workspace_initialized(workspace_id, workspace)
             storage.set_project_quota(workspace_id, multiplier=1)
     except (OSError, WorkspaceStorageError) as exc:
         raise HTTPException(status_code=503, detail="Unable to recover workspace restore.") from exc
