@@ -25,6 +25,7 @@ from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.executor")
 WORKSPACE_ID_PATTERN = re.compile(r"^dbx_[A-Za-z0-9_-]{20,40}$")
+GIT_ALLOWED_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 SERVICE_TOKEN = os.getenv("DEVBOX_EXECUTOR_TOKEN", "")
 WORKSPACE_STORAGE_ROOT = os.getenv("DEVBOX_WORKSPACE_STORAGE_ROOT") or "/srv/devbox/workspaces"
 WORKSPACE_DISK_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
@@ -154,6 +155,7 @@ def run_git_command(
             detail="Privileged broker is unavailable.",
         ) from exc
 
+
 def require_snapshot_store() -> SnapshotStore:
     return snapshot_store
 
@@ -270,6 +272,7 @@ def reconcile_orphaned_git_helpers() -> int:
         logger.exception("Unable to reconcile temporary Git helpers through broker")
         return 0
 
+
 async def reconciliation_loop() -> None:
     while True:
         try:
@@ -290,7 +293,9 @@ async def lifespan(_: FastAPI):
     try:
         broker_client.ping()
     except BrokerUnavailable as exc:
-        raise RuntimeError("Privileged broker is unavailable during worker startup.") from exc
+        raise RuntimeError(
+            "Privileged broker is unavailable during worker startup."
+        ) from exc
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
         yield
@@ -762,7 +767,9 @@ def get_workspace_status(workspace_id: str) -> dict:
         or workspace_mount is None
         or workspace_mount.get("Source") != str(workspace_path)
     ):
-        _stop_unsafe_container(container, "workspace identity or storage binding failed validation")
+        _stop_unsafe_container(
+            container, "workspace identity or storage binding failed validation"
+        )
         return {
             "workspace_id": workspace_id,
             "container_id": None,
