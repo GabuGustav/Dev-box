@@ -5,7 +5,6 @@ import pytest
 
 import worker.instance_lock as instance_lock
 
-
 pytestmark = pytest.mark.skipif(
     instance_lock.fcntl is None,
     reason="Advisory service locks are available only on Linux.",
