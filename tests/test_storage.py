@@ -73,7 +73,7 @@ def test_workspace_provisioning_sets_a_hard_project_quota(tmp_path):
     directory = storage.ensure_workspace(WORKSPACE_ID)
 
     assert directory.is_dir()
-    assert directory.stat().st_mode & 0o777 == 0o700
+    assert directory.stat().st_mode & 0o7777 == 0o2770
     quota_commands = [call[0] for call in runner.calls if call[0][0] == "xfs_quota"]
     assert quota_commands == [
         ["xfs_quota", "-x", "-c", "state -p", str(storage.root)],
