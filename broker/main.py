@@ -6,6 +6,7 @@ import hmac
 import logging
 import os
 import re
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -886,6 +887,83 @@ def api_mark_storage_initialized(
         lambda: storage.mark_workspace_initialized(workspace_id, directory)
     )
     return {"workspace_id": workspace_id, "status": "initialized"}
+
+
+@app.post(
+    "/internal/storage/{storage_kind}/{workspace_id}/recover-restore",
+    dependencies=[Depends(require_service_token)],
+)
+def api_recover_storage_restore(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+) -> dict[str, str]:
+    storage = _storage_for(storage_kind)
+    _storage_operation(storage.validate_backend)
+    _, workspace = storage._workspace_path(workspace_id)
+    stage = storage.root / f".{workspace.name}.restore-stage"
+    backup = storage.root / f".{workspace.name}.restore-backup"
+    for path in (workspace, stage, backup):
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise HTTPException(status_code=409, detail="Restore path is unsafe.")
+        if path.parent.resolve() != storage.root.resolve():
+            raise HTTPException(status_code=409, detail="Restore path escaped its storage root.")
+    try:
+        if backup.exists():
+            if workspace.exists():
+                storage.mark_workspace_initialized(workspace_id, workspace)
+                shutil.rmtree(backup)
+            else:
+                os.replace(backup, workspace)
+                storage.mark_workspace_initialized(workspace_id, workspace)
+        if stage.exists():
+            shutil.rmtree(stage)
+        if workspace.exists():
+            storage.set_project_quota(workspace_id, multiplier=1)
+    except (OSError, WorkspaceStorageError) as exc:
+        raise HTTPException(status_code=503, detail="Unable to recover workspace restore.") from exc
+    return {"workspace_id": workspace_id, "state": "recovered"}
+
+
+@app.post(
+    "/internal/storage/{storage_kind}/{workspace_id}/commit-restore",
+    dependencies=[Depends(require_service_token)],
+)
+def api_commit_storage_restore(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+) -> dict[str, str]:
+    storage = _storage_for(storage_kind)
+    _storage_operation(storage.validate_backend)
+    _, workspace = storage._workspace_path(workspace_id)
+    stage = storage.root / f".{workspace.name}.restore-stage"
+    backup = storage.root / f".{workspace.name}.restore-backup"
+    for path in (workspace, stage, backup):
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise HTTPException(status_code=409, detail="Restore path is unsafe.")
+        if path.parent.resolve() != storage.root.resolve():
+            raise HTTPException(status_code=409, detail="Restore path escaped its storage root.")
+    if not stage.is_dir() or backup.exists():
+        raise HTTPException(status_code=409, detail="Restore staging state is invalid.")
+    try:
+        if workspace.exists():
+            os.replace(workspace, backup)
+        try:
+            os.replace(stage, workspace)
+            storage.mark_workspace_initialized(workspace_id, workspace)
+            storage.set_project_quota(workspace_id, multiplier=1)
+        except Exception:
+            if workspace.exists():
+                shutil.rmtree(workspace)
+            if backup.exists():
+                os.replace(backup, workspace)
+                storage.mark_workspace_initialized(workspace_id, workspace)
+                storage.set_project_quota(workspace_id, multiplier=1)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    except (OSError, WorkspaceStorageError) as exc:
+        raise HTTPException(status_code=503, detail="Unable to commit workspace restore.") from exc
+    return {"workspace_id": workspace_id, "state": "restored"}
 
 
 @app.delete(
