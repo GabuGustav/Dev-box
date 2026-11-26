@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import docker
 import pytest
+from fastapi import HTTPException
 
 from broker import main as broker
 from worker.storage import XFSWorkspaceStorage
@@ -108,6 +109,44 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
         )
         assert "No commits yet" in output or "On branch" in output
         assert not fsmonitor_marker.exists(), "Repository-local fsmonitor command was executed"
+
+        bare_remote = workspace_path / "attacker.git"
+        subprocess.run(["git", "init", "--bare", "--quiet", str(bare_remote)], check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://github.com/example/repo.git"],
+            cwd=workspace_path,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "--local",
+                "url.file:///workspace/attacker.git.insteadOf",
+                "https://github.com/example/repo.git",
+            ],
+            cwd=workspace_path,
+            check=True,
+        )
+        git_network = client.networks.create(
+            name=f"devbox-git-helper-test-{uuid4().hex[:8]}",
+            driver="bridge",
+            internal=True,
+        )
+        monkeypatch.setattr(broker, "GIT_EGRESS_NETWORK", git_network.name)
+        try:
+            with pytest.raises(HTTPException) as fetch_error:
+                broker.run_git_helper(
+                    workspace_id,
+                    broker.GitHelperRequest(
+                        arguments=["fetch", "--prune", "origin"],
+                        network_enabled=True,
+                    ),
+                )
+            assert fetch_error.value.status_code == 400
+            assert "transport 'file' not allowed" in str(fetch_error.value.detail)
+        finally:
+            git_network.remove()
         assert client.containers.list(
             all=True,
             filters={
