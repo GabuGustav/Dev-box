@@ -666,7 +666,7 @@ def test_snapshot_restore_rejects_malformed_tar_header(tmp_path, monkeypatch):
         member.size = 1
         archive.addfile(member, io.BytesIO(b"x"))
     payload = bytearray(archive_bytes.getvalue())
-    payload[148:156] = b"0000000\\0"
+    payload[148:156] = b"0000000\0"
 
     store, workspace, snapshot = prepare_restore_with_archive(
         tmp_path, monkeypatch, bytes(payload)
