@@ -152,3 +152,15 @@ These controls reduce risk but do not establish a VM-equivalent isolation bounda
 - Distributed locking before multiple worker processes or replicas are supported.
 
 Track implementation and evidence in [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md). Do not mark an item complete based on a documentation change or mocked test alone.
+
+
+## 13. External security references
+
+The remediation plan follows these primary references:
+
+- [Docker Engine security](https://docs.docker.com/engine/security/) — Docker documents that daemon control can expose host filesystems and that a service provisioning containers through Docker must strictly validate every parameter.
+- [Protect the Docker daemon socket](https://docs.docker.com/engine/security/protect-access/) — Docker documents authenticated SSH/TLS approaches for remote daemon access. DevBox should not replace the Unix socket with an unauthenticated TCP Docker API.
+- [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html) — reinforces that Docker socket access is effectively host-root access and that a read-only socket mount does not make the API read-only.
+- [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — documents project-tree initialization and quota management operations used by the current storage backend.
+
+The proposed host broker is therefore an application-level, typed capability boundary; it must not be a generic Docker socket proxy that forwards arbitrary daemon endpoints.
