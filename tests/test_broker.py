@@ -684,3 +684,40 @@ def test_broker_restore_metadata_failures_roll_back_to_previous_tree(
     assert not (workspace / "restored.txt").exists()
     assert not stage.exists()
     assert not (tmp_path / f".{workspace.name}.restore-backup").exists()
+
+
+def test_broker_restore_backup_cleanup_failure_can_be_recovered(
+    tmp_path, monkeypatch
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "previous.txt").write_text("previous", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "restored.txt").write_text("restored", encoding="utf-8")
+    backup = tmp_path / f".{workspace.name}.restore-backup"
+    real_rmtree = broker.shutil.rmtree
+
+    def fail_backup_cleanup(path, *args, **kwargs):
+        if path == backup:
+            raise OSError("injected backup cleanup failure")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(broker.shutil, "rmtree", fail_backup_cleanup)
+
+    with pytest.raises(HTTPException) as error:
+        broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert error.value.status_code == 503
+    assert (workspace / "restored.txt").read_text(encoding="utf-8") == "restored"
+    assert (backup / "previous.txt").read_text(encoding="utf-8") == "previous"
+
+    recovery = broker.api_recover_storage_restore("workspace", workspace_id)
+
+    assert recovery["state"] == "recovered"
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert not backup.exists()
+    assert not stage.exists()
