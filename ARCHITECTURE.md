@@ -186,9 +186,9 @@ The target architecture separates:
 2. **Privileged host broker:** performs only typed, allowlisted Docker and XFS operations. It must not expose arbitrary Docker API passthrough, arbitrary host paths, or shell execution.
 3. **Workspace runtime:** remains untrusted and receives only its own workspace mount; never receives the Docker socket or broker credentials.
 
-The broker is a target design, not an implemented component. Its request schema, path derivation, authorization, audit trail, startup/recovery behavior, and failure modes must be reviewed and tested before migration.
+The broker is partially implemented: workspace container lifecycle, image management, Git helper execution, reconciliation, and authenticated worker RPC are in place. The worker no longer mounts the Docker socket or includes the Docker SDK. XFS quota administration remains in the worker, which still receives `CAP_SYS_ADMIN`; that capability must move behind the broker before the worker can be considered unprivileged. The worker also retains shared access to workspace/snapshot storage, so this is not yet a hostile-tenant data-isolation boundary.
 
-The current Compose deployment also publishes PostgreSQL and the plain-HTTP API on host ports. Production deployment must keep PostgreSQL on an internal network and terminate TLS at a trusted reverse proxy. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
+The current Compose deployment keeps PostgreSQL internal and binds the API to host loopback by default. Production deployment must terminate TLS at a trusted reverse proxy before exposing the API externally. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
 
 
 **PID namespace note:** the workspace runtime relies on Docker's default private PID namespace. The Docker API does not accept `pid_mode="private"`; omitting the setting selects the private default. The Linux integration test verifies that one workspace cannot see another workspace's process marker.
