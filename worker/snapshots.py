@@ -112,6 +112,8 @@ class SnapshotStore:
         max_snapshots: int = 10,
         max_snapshot_bytes: int = 10 * 1024 * 1024 * 1024,
         max_entries: int = 200_000,
+        registry_path: str | Path | None = None,
+        require_group_permissions: bool = False,
     ) -> None:
         key = None
         key_error = None
@@ -137,10 +139,50 @@ class SnapshotStore:
         self.max_snapshots = max_snapshots
         self.max_snapshot_bytes = max_snapshot_bytes
         self.max_entries = max_entries
-        self.registry = storage.root / ".devbox-snapshots.sqlite3"
+        self.legacy_registry = storage.root / ".devbox-snapshots.sqlite3"
+        self.registry = Path(registry_path) if registry_path else self.legacy_registry
+        self.require_group_permissions = require_group_permissions
+        if not self.registry.is_absolute():
+            raise SnapshotError("Snapshot metadata registry path must be absolute.")
+        self._migrate_legacy_registry()
+
+    def _migrate_legacy_registry(self) -> None:
+        if self.registry.is_symlink():
+            raise SnapshotError("Snapshot metadata registry path is unsafe.")
+        if self.registry == self.legacy_registry or self.registry.exists():
+            if self.registry.exists() and not self.registry.is_file():
+                raise SnapshotError("Snapshot metadata registry path is unsafe.")
+            return
+        legacy = self.legacy_registry
+        if not legacy.exists():
+            return
+        if legacy.is_symlink() or not legacy.is_file():
+            raise SnapshotError("Legacy snapshot metadata registry is unsafe.")
+        temporary = self.registry.with_name(self.registry.name + ".migrating")
+        if temporary.is_symlink() or temporary.exists():
+            raise SnapshotError("Snapshot metadata migration path already exists or is unsafe.")
+        try:
+            self.registry.parent.mkdir(parents=True, exist_ok=True)
+            source = sqlite3.connect(legacy.resolve().as_uri() + "?mode=ro", uri=True)
+            destination = sqlite3.connect(temporary)
+            try:
+                source.backup(destination)
+                destination.commit()
+            finally:
+                destination.close()
+                source.close()
+            temporary.chmod(0o600)
+            os.replace(temporary, self.registry)
+        except (OSError, sqlite3.Error) as exc:
+            temporary.unlink(missing_ok=True)
+            raise SnapshotError("Unable to migrate the legacy snapshot metadata registry.") from exc
 
     def _connect(self) -> sqlite3.Connection:
+        if self.registry.is_symlink() or (self.registry.exists() and not self.registry.is_file()):
+            raise SnapshotError("Snapshot metadata registry path is unsafe.")
+        self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30)
+        self.registry.chmod(0o600)
         connection.execute(
             """CREATE TABLE IF NOT EXISTS snapshots (
                 snapshot_id TEXT PRIMARY KEY,
@@ -156,10 +198,16 @@ class SnapshotStore:
 
     def _workspace_directory(self, workspace_id: str) -> Path:
         directory = self.storage.ensure_workspace(workspace_id)
-        try:
-            directory.chmod(0o700)
-        except OSError as exc:
-            raise SnapshotError("Unable to secure the snapshot directory.") from exc
+        if self.require_group_permissions:
+            directory_stat = directory.stat(follow_symlinks=False)
+            if (
+                directory_stat.st_uid != 10001
+                or directory_stat.st_gid != 10001
+                or directory_stat.st_mode & 0o2070 != 0o2070
+            ):
+                raise SnapshotError(
+                    "Snapshot directory does not have broker-managed group permissions."
+                )
 
         if not self.registry.exists() and any(
             entry.name.endswith(".dbxsnap") or entry.name.endswith(".dbxsnap.tmp")
