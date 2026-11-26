@@ -806,10 +806,10 @@ def api_set_storage_quota(
     workspace_id: str,
     payload: QuotaRequest,
 ) -> dict[str, str | int]:
+    storage = _storage_for(storage_kind)
+    _storage_operation(storage.validate_backend)
     _storage_operation(
-        lambda: _storage_for(storage_kind).set_project_quota(
-            workspace_id, multiplier=payload.multiplier
-        )
+        lambda: storage.set_project_quota(workspace_id, multiplier=payload.multiplier)
     )
     return {
         "workspace_id": workspace_id,
@@ -828,6 +828,7 @@ def api_prepare_restore_directory(
     payload: QuotaRequest,
 ) -> dict[str, str]:
     storage = _storage_for(storage_kind)
+    _storage_operation(storage.validate_backend)
     _, workspace_directory = storage._workspace_path(workspace_id)
     staging_directory = storage.root / f".{workspace_directory.name}.restore-stage"
     _storage_operation(
@@ -850,6 +851,7 @@ def api_mark_storage_initialized(
     workspace_id: str,
 ) -> dict[str, str]:
     storage = _storage_for(storage_kind)
+    _storage_operation(storage.validate_backend)
     _, directory = storage._workspace_path(workspace_id)
     _storage_operation(
         lambda: storage.mark_workspace_initialized(workspace_id, directory)
