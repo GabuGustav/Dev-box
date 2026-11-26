@@ -457,7 +457,7 @@ class SnapshotStore:
                         raise SnapshotError("Snapshot path escapes the restore directory.")
                     if member.isdir():
                         destination.mkdir(parents=True, exist_ok=True)
-                        destination.chmod(0o700)
+                        destination.chmod(0o770)
                     elif member.issym():
                         symlinks.append((destination, member.linkname))
                     else:
@@ -467,7 +467,7 @@ class SnapshotStore:
                             raise SnapshotError("Snapshot file contents are unavailable.")
                         with input_file, destination.open("xb") as output_file:
                             shutil.copyfileobj(input_file, output_file, CHUNK_SIZE)
-                        destination.chmod(0o755 if member.mode & 0o111 else 0o644)
+                        destination.chmod(0o770 if member.mode & 0o111 else 0o660)
             reader.verify()
 
         for destination, target in symlinks:
