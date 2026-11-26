@@ -67,8 +67,8 @@ class XFSWorkspaceStorage:
         self.shared_group_id = shared_group_id
         if shared_group_id is not None and shared_group_id < 0:
             raise WorkspaceStorageError("Shared storage group ID must be non-negative.")
-        if directory_mode not in {0o700, 0o770}:
-            raise WorkspaceStorageError("Workspace directory mode must be 0700 or 0770.")
+        if directory_mode not in {0o700, 0o770, 0o2770}:
+            raise WorkspaceStorageError("Workspace directory mode must be 0700, 0770, or 2770.")
         self.directory_mode = directory_mode
         self.legacy_registry = self.root / ".devbox-storage.sqlite3"
         self.registry = Path(registry_path) if registry_path else self.legacy_registry
@@ -120,7 +120,7 @@ class XFSWorkspaceStorage:
         if self.shared_group_id is not None:
             try:
                 self.owner_setter(self.root, 0, self.shared_group_id)
-                self.root.chmod(0o2770)
+                self.root.chmod(0o2750)
             except OSError as exc:
                 raise WorkspaceStorageError(
                     "Unable to grant the unprivileged worker group access to storage root."
@@ -400,10 +400,10 @@ class XFSWorkspaceStorage:
         )
         if registered_project_id != project_id:
             raise WorkspaceStorageError("Restore project ID does not match the registry.")
-        directory.mkdir(mode=0o700)
+        directory.mkdir(mode=self.directory_mode)
         try:
             self.owner_setter(directory, 10001, 10001)
-            directory.chmod(0o700)
+            directory.chmod(self.directory_mode)
         except OSError as exc:
             raise WorkspaceStorageError(
                 "Unable to secure the restore staging directory."
