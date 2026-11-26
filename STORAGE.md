@@ -132,3 +132,15 @@ pytest tests/integration/
 ```
 
 These tests are opt-in because they modify filesystem quota state and create Docker containers. Never point them at a filesystem containing valuable data or live workspaces.
+
+
+## Security audit follow-up
+
+The current worker requires Docker socket access and `CAP_SYS_ADMIN` to manage containers and XFS project quotas. This is a host-privileged trust boundary: compromise of the worker may compromise the host and every workspace. Keep this service private and tightly controlled until the planned narrow host broker is implemented and independently tested.
+
+The broker must accept only workspace-scoped typed operations and derive storage paths/project IDs from trusted registry state. It must not accept arbitrary host paths, arbitrary Docker API payloads, or shell commands. This is a remediation target; it is not implemented by this document update.
+
+Real XFS/Docker integration, adversarial snapshot archive tests, interrupted-restore drills, and registry/key recovery exercises remain required. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
+
+
+**PID namespace note:** Docker uses a private PID namespace by default. Do not pass `pid_mode="private"` to the Docker API; that value is invalid. DevBox now relies on the default (unset) PID mode and verifies process isolation in the Docker integration test.

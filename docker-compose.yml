@@ -4,9 +4,7 @@ services:
     environment:
       POSTGRES_DB: devbox
       POSTGRES_USER: devbox
-      POSTGRES_PASSWORD: devbox
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set a unique DB_PASSWORD in .env}
     volumes:
       - devbox_postgres:/var/lib/postgresql/data
     healthcheck:
@@ -77,12 +75,15 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://devbox:devbox@db:5432/devbox
+      DATABASE_URL: postgresql+psycopg://devbox:${DB_PASSWORD:?Set DB_PASSWORD in .env}@db:5432/devbox
       EXECUTOR_SERVICE_URL: http://worker:9000
       EXECUTOR_SERVICE_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
       LIFECYCLE_RECONCILE_INTERVAL_SECONDS: ${LIFECYCLE_RECONCILE_INTERVAL_SECONDS:-60}
     ports:
-      - "8000:8000"
+      - "${API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    networks:
+      - default
+      - api_proxy
     depends_on:
       db:
         condition: service_healthy
@@ -99,3 +100,6 @@ networks:
     internal: true
   egress_public:
     name: devbox_egress_public
+  api_proxy:
+    name: devbox_api_proxy
+    internal: true

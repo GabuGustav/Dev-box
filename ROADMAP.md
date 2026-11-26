@@ -45,6 +45,17 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 **Exit criteria:** not yet met. Snapshot implementation, periodic unsafe-mount enforcement, and API/database lifecycle reconciliation are implemented. Real XFS/Docker integration runs, backup/restore drills, and adversarial isolation testing are still required.
 
+### Phase 2 security-hardening overlay
+
+The implementation checklist and exit gates are tracked in [Phase 2 Security Hardening](docs/PHASE_2_SECURITY_HARDENING.md). Phase 2 is **not security-release complete** until the deployment exposure, privileged-worker boundary, runtime isolation, storage recovery, network egress, concurrency, and CI verification gates in that plan are closed. Source-level controls and mocked tests do not substitute for Linux XFS/Docker integration and adversarial testing.
+
+- [x] Complete source-level security investigation and record confirmed risks versus unverified hypotheses.
+- [x] Create isolated remediation branch from `phase-2-isolated-workspaces`.
+- [x] Complete deployment exposure and secret-hygiene fixes (CI run 45860830556 passed).
+- [ ] Reduce privileged-worker blast radius with a narrowly scoped host broker.
+- [ ] Complete adversarial snapshot/archive and egress testing (XFS/Docker workspace integration baseline passed; adversarial archive and proxy bypass tests remain).
+- [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed; extended recovery/fuzz drills remain).
+
 ## Phase 3 — Git and repository discovery
 
 - [x] Normalize repository URLs and store repository identities.

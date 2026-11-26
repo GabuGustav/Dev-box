@@ -174,3 +174,21 @@ The user's laptop should be only an AI client/browser. Builds run on the DevBox 
 - Never expose host filesystem paths or infrastructure credentials to agents.
 - Never allow a workspace to access another workspace's volume by default.
 - Never treat a successful build as proof of runtime correctness.
+
+
+## 13. Privileged execution boundary — remediation required
+
+The current deployment has a trusted worker process that mounts the Docker socket and receives `CAP_SYS_ADMIN` to provision containers and administer XFS project quotas. This worker is host-privileged in practical terms. It must be treated as infrastructure, not as an ordinary application worker.
+
+The target architecture separates:
+
+1. **Unprivileged orchestration worker:** validates user/workspace intent, schedules operations, and communicates over an authenticated narrow protocol.
+2. **Privileged host broker:** performs only typed, allowlisted Docker and XFS operations. It must not expose arbitrary Docker API passthrough, arbitrary host paths, or shell execution.
+3. **Workspace runtime:** remains untrusted and receives only its own workspace mount; never receives the Docker socket or broker credentials.
+
+The broker is a target design, not an implemented component. Its request schema, path derivation, authorization, audit trail, startup/recovery behavior, and failure modes must be reviewed and tested before migration.
+
+The current Compose deployment also publishes PostgreSQL and the plain-HTTP API on host ports. Production deployment must keep PostgreSQL on an internal network and terminate TLS at a trusted reverse proxy. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
+
+
+**PID namespace note:** the workspace runtime relies on Docker's default private PID namespace. The Docker API does not accept `pid_mode="private"`; omitting the setting selects the private default. The Linux integration test verifies that one workspace cannot see another workspace's process marker.

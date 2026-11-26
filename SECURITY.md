@@ -124,3 +124,55 @@ Provide:
 - Malicious filenames, symlinks, and archive entries cannot escape the workspace.
 - Operation-scoped provider credentials do not persist into workspace files or snapshots; credentials already written into a workspace are treated as sensitive encrypted snapshot content and must be rotated or removed.
 - Cancellation terminates child processes and releases resources.
+
+
+## 12. Phase 2 audit status (2026-11-26)
+
+The current implementation has useful baseline controls, but must not be described as production-ready for hostile multi-tenant execution.
+
+### Confirmed deployment risks
+
+- The reviewed Compose configuration publishes PostgreSQL on host port 5432 and supplies static `devbox/devbox` credentials. Remove host publication and inject deployment-specific secrets.
+- The reviewed Compose configuration publishes the API on host port 8000 and starts Uvicorn directly over HTTP. This is for trusted local development only; external deployments require TLS termination and a documented trusted-proxy configuration.
+- The worker mounts the Docker socket and receives `CAP_SYS_ADMIN` for Docker/XFS operations. Compromise of this process can compromise the host. This is an elevated trust-boundary risk, not proof of a remotely exploitable path.
+
+### Controls observed in source
+
+Workspace containers run as a non-root user, drop Linux capabilities, use a read-only root filesystem, enable `no-new-privileges`, use private PID/IPC namespaces, apply CPU/memory/PID limits, and default to no network. Snapshot code uses authenticated AES-GCM encryption and rejects multiple unsafe archive entry types. API keys are stored as hashes and workspace ownership checks are present in the inspected routes.
+
+These controls reduce risk but do not establish a VM-equivalent isolation boundary.
+
+### Verification still required
+
+- Adversarial container escape and cross-workspace tests on supported Linux hosts.
+- Explicit seccomp/AppArmor/SELinux policy validation and user-namespace assessment.
+- Proxy bypass, DNS rebinding, IPv4/IPv6, and metadata endpoint tests.
+- Malicious snapshot archive, interrupted restore, and concurrent operation tests.
+- Real XFS quota, Docker persistence, backup, and restore drills.
+- Distributed locking before multiple worker processes or replicas are supported.
+
+Track implementation and evidence in [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md). Do not mark an item complete based on a documentation change or mocked test alone.
+
+
+## 13. External security references
+
+The remediation plan follows these primary references:
+
+- [Docker Engine security](https://docs.docker.com/engine/security/) — Docker documents that daemon control can expose host filesystems and that a service provisioning containers through Docker must strictly validate every parameter.
+- [Protect the Docker daemon socket](https://docs.docker.com/engine/security/protect-access/) — Docker documents authenticated SSH/TLS approaches for remote daemon access. DevBox should not replace the Unix socket with an unauthenticated TCP Docker API.
+- [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html) — reinforces that Docker socket access is effectively host-root access and that a read-only socket mount does not make the API read-only.
+- [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — documents project-tree initialization and quota management operations used by the current storage backend.
+
+The proposed host broker is therefore an application-level, typed capability boundary; it must not be a generic Docker socket proxy that forwards arbitrary daemon endpoints.
+
+
+## 14. Remediation verification evidence
+
+CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830556) passed on the security-hardening branch:
+
+- Quality job: Compose validation and image builds passed; Ruff passed; 109 tests passed, 5 skipped; coverage 75%.
+- Linux XFS/Docker integration job: 5 tests passed on disposable loopback XFS project-quota filesystems. This included block/inode quota enforcement, encrypted snapshot restore across separate XFS mounts, workspace mount isolation, persistence across container replacement, and private PID namespace isolation.
+
+The integration run caught and led to correction of an invalid explicit Docker `pid_mode="private"` value. DevBox now relies on Docker's default private PID namespace, and the integration test verifies the isolation behavior.
+
+This verifies the current baseline and Phase 2.1 deployment hardening; it does **not** complete the privileged-worker boundary, adversarial snapshot archive fuzzing, proxy bypass/DNS rebinding testing, distributed concurrency, or hostile-tenant isolation goals.

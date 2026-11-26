@@ -132,7 +132,7 @@ def test_start_creates_hardened_container_on_workspace_storage(monkeypatch, tmp_
     container = fake.containers.created[0][1]
     assert container["user"] == "10001:10001"
     assert container["network_mode"] == "none"
-    assert container["pid_mode"] == "private"
+    assert "pid_mode" not in container  # Docker defaults to a private PID namespace.
     assert container["ipc_mode"] == "private"
     assert container["read_only"] is True
     assert container["cap_drop"] == ["ALL"]

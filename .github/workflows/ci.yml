@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces"]
+    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening"]
   pull_request:
     branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces"]
 
@@ -22,8 +22,47 @@ jobs:
       - name: Build Git-enabled workspace image
         run: docker build --file workspace-image/Dockerfile --tag devbox-workspace:ci .
       - name: Validate Docker Compose configuration
-        run: cp .env.example .env && docker compose config --quiet
+        run: cp .env.example .env && DB_PASSWORD=ci-only-random-password EXECUTOR_SERVICE_TOKEN=ci-only-executor-token-with-sufficient-length docker compose config --quiet
       - name: Lint
         run: ruff check .
       - name: Test
         run: pytest --cov=app --cov=worker --cov-report=term-missing
+
+  linux-xfs-integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies and XFS tools
+        run: |
+          pip install -e ".[dev]"
+          sudo apt-get update
+          sudo apt-get install -y xfsprogs
+      - name: Provision disposable XFS project-quota filesystems
+        run: |
+          sudo mkdir -p /mnt/devbox-workspace-xfs /mnt/devbox-snapshot-xfs
+          sudo truncate -s 1G /tmp/devbox-workspace-xfs.img
+          sudo truncate -s 1G /tmp/devbox-snapshot-xfs.img
+          sudo mkfs.xfs -f /tmp/devbox-workspace-xfs.img
+          sudo mkfs.xfs -f /tmp/devbox-snapshot-xfs.img
+          sudo mount -o loop,prjquota /tmp/devbox-workspace-xfs.img /mnt/devbox-workspace-xfs
+          sudo mount -o loop,prjquota /tmp/devbox-snapshot-xfs.img /mnt/devbox-snapshot-xfs
+          sudo xfs_quota -x -c "state -p" /mnt/devbox-workspace-xfs
+          sudo xfs_quota -x -c "state -p" /mnt/devbox-snapshot-xfs
+      - name: Run real XFS and Docker integration tests
+        run: |
+          sudo -E env \
+            DEVBOX_TEST_XFS_ROOT=/mnt/devbox-workspace-xfs \
+            DEVBOX_TEST_SNAPSHOT_XFS_ROOT=/mnt/devbox-snapshot-xfs \
+            DEVBOX_TEST_SNAPSHOT_ENCRYPTION_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+            DEVBOX_RUN_DOCKER_INTEGRATION=1 \
+            "$(which python)" -m pytest -v tests/integration
+      - name: Clean up disposable XFS filesystems
+        if: always()
+        run: |
+          sudo umount /mnt/devbox-snapshot-xfs || true
+          sudo umount /mnt/devbox-workspace-xfs || true
+          sudo rm -f /tmp/devbox-workspace-xfs.img /tmp/devbox-snapshot-xfs.img
