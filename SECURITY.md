@@ -164,3 +164,15 @@ The remediation plan follows these primary references:
 - [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — documents project-tree initialization and quota management operations used by the current storage backend.
 
 The proposed host broker is therefore an application-level, typed capability boundary; it must not be a generic Docker socket proxy that forwards arbitrary daemon endpoints.
+
+
+## 14. Remediation verification evidence
+
+CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830556) passed on the security-hardening branch:
+
+- Quality job: Compose validation and image builds passed; Ruff passed; 109 tests passed, 5 skipped; coverage 75%.
+- Linux XFS/Docker integration job: 5 tests passed on disposable loopback XFS project-quota filesystems. This included block/inode quota enforcement, encrypted snapshot restore across separate XFS mounts, workspace mount isolation, persistence across container replacement, and private PID namespace isolation.
+
+The integration run caught and led to correction of an invalid explicit Docker `pid_mode="private"` value. DevBox now relies on Docker's default private PID namespace, and the integration test verifies the isolation behavior.
+
+This verifies the current baseline and Phase 2.1 deployment hardening; it does **not** complete the privileged-worker boundary, adversarial snapshot archive fuzzing, proxy bypass/DNS rebinding testing, distributed concurrency, or hostile-tenant isolation goals.
