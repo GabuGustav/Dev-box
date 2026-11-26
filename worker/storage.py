@@ -30,8 +30,8 @@ class XFSWorkspaceStorage:
     """Persistent workspace directories with kernel-enforced XFS project quotas.
 
     The storage root must be a dedicated XFS mount with project quota accounting
-    and enforcement enabled. The worker must have permission to issue xfs_quota
-    ioctls against that mount.
+    and enforcement enabled. This implementation is broker-only; the worker uses
+    RemoteWorkspaceStorage and never invokes xfs_quota or owns the project registry.
     """
 
     def __init__(
