@@ -6,7 +6,7 @@ DevBox is a model-agnostic platform where AI agents can work with real repositor
 
 ## Current status
 
-**Phase 3 implementation is in progress on `phase-2-isolated-workspaces`.** DevBox now supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
+**Phase 3 implementation exists, and Phase 2 security remediation is now in progress on `phase-2-security-hardening`.** The remediation branch has passed CI for deployment-default changes (108 tests passed; five Linux XFS/Docker integration tests remain skipped pending dedicated infrastructure). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
 
 ## Core principles
 
