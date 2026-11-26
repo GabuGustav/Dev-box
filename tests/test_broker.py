@@ -325,7 +325,8 @@ def test_broker_storage_api_delegates_only_workspace_scoped_operations(
         "status": "ready",
     }
     ensured = broker.api_ensure_storage_workspace("workspace", workspace_id)
-    assert ensured["path"] == str(workspace.root / broker.names_for(workspace_id)[0].replace("devbox-ws-", ""))
+    expected_directory = workspace._workspace_path(workspace_id)[1]
+    assert ensured["path"] == str(expected_directory)
 
     quota = broker.api_set_storage_quota(
         "workspace", workspace_id, broker.QuotaRequest(multiplier=3)
