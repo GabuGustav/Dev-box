@@ -120,7 +120,7 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 **Exit:** runtime inspection confirms worker has no Docker socket, no `CAP_SYS_ADMIN`, and broker is not reachable from untrusted workspace containers.
 
 ### 2.2.7 — CI and documentation
-- [ ] Add broker unit/API tests and a Docker-backed integration job.
+- [x] Add broker unit tests and include broker image/configuration in CI (CI run 45862764928 passed; broker-backed live Docker integration remains pending).
 - [ ] Add negative broker capability tests.
 - [ ] Verify worker health, workspace lifecycle, snapshots, Git operations, reconciliation, and restart recovery end-to-end.
 - [ ] Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, and `ROADMAP.md`.
@@ -140,8 +140,9 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 ## Progress log
 
 - [x] Source inventory: `worker/main.py`, `worker/storage.py`, `worker/snapshots.py`, `docker-compose.yml`, `worker.Dockerfile`, and related tests inspected.
-- [ ] Broker API design reviewed and fully integrated. Initial broker endpoints, Git command allowlist, service-token validation, Docker lifecycle methods, and unit tests are implemented; the worker still uses Docker directly and the XFS operations are not migrated.
+- [ ] Broker API design reviewed and fully integrated. Initial broker endpoints, Git command allowlist, service-token validation, Docker lifecycle methods, and unit tests are implemented; worker route migration and XFS delegation are still pending.
 - [x] Added broker package, FastAPI service, dedicated Docker image, internal Compose network, separate broker token, and unit tests for authorization, path validation, fixed workspace container configuration, Git command allowlisting, and idempotent stop behavior.
+- [x] CI run 45862764928: broker image build, proxy/workspace image builds, Compose validation, Ruff, and 132 tests passed; five XFS/Docker tests skipped in the quality job. The separate Linux XFS/Docker integration job passed all five tests. Broker-inclusive coverage: 69%.
 - [ ] Broker service has not yet been connected to worker routes; worker still mounts Docker socket and has `CAP_SYS_ADMIN`.
 - [ ] XFS quota operations are still executed directly by worker; privilege removal is not complete.
 
