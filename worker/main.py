@@ -215,90 +215,42 @@ def _stop_unsafe_container(container, reason: str) -> None:
 
 
 def reconcile_managed_containers() -> int:
-    """Stop managed containers whose workspace mount no longer matches its XFS directory."""
-    stopped = 0
+    """Recover snapshot transactions for broker-managed workspaces."""
+    recovered = 0
     try:
-        containers = docker_client.containers.list(
-            all=True, filters={"label": "devbox.managed=true"}
-        )
-    except APIError:
-        logger.exception("Unable to enumerate managed workspace containers")
-        return stopped
+        workspace_ids = broker_client.list_managed_workspace_ids()
+    except BrokerUnavailable:
+        logger.exception("Unable to enumerate broker-managed workspaces")
+        return recovered
 
-    for container in containers:
+    for workspace_id in workspace_ids:
         try:
-            container.reload()
-            labels = container.attrs.get("Config", {}).get("Labels") or {}
-            workspace_id = labels.get("devbox.workspace_id")
-            if labels.get("devbox.managed") != "true" or not workspace_id:
-                _stop_unsafe_container(container, "managed workspace labels are missing")
-                stopped += 1
-                continue
             with workspace_lock(workspace_id):
-                container.reload()
-                labels = container.attrs.get("Config", {}).get("Labels") or {}
-                if labels.get("devbox.managed") != "true":
-                    _stop_unsafe_container(container, "managed workspace label changed")
-                    stopped += 1
-                    continue
-                expected_name, _ = names_for(workspace_id)
-                if container.name != expected_name:
-                    _stop_unsafe_container(container, "container name does not match workspace ID")
-                    stopped += 1
-                    continue
                 snapshot_store.recover_restore(workspace_id)
-                workspace_path = workspace_storage.ensure_workspace(workspace_id)
-                mounts = container.attrs.get("Mounts", [])
-                workspace_mount = next(
-                    (mount for mount in mounts if mount.get("Destination") == "/workspace"),
-                    None,
-                )
-                if (
-                    workspace_mount is None
-                    or workspace_mount.get("Source") != str(workspace_path)
-                ):
-                    _stop_unsafe_container(
-                        container, "workspace bind mount does not match XFS storage"
-                    )
-                    stopped += 1
+                workspace_storage.validate_backend()
+                recovered += 1
         except Exception as exc:
-            _stop_unsafe_container(container, f"workspace storage validation failed: {exc}")
-            stopped += 1
-    if stopped:
-        logger.warning(
-            "Workspace reconciliation stopped unsafe containers",
-            extra={"count": stopped},
-        )
-    return stopped
-
+            logger.exception(
+                "Workspace recovery failed; asking broker to stop executor",
+                extra={"workspace_id": workspace_id},
+            )
+            try:
+                broker_client.stop_workspace(workspace_id)
+            except BrokerError:
+                logger.exception(
+                    "Broker could not stop workspace after recovery failure",
+                    extra={"workspace_id": workspace_id},
+                )
+    return recovered
 
 
 def reconcile_orphaned_git_helpers() -> int:
-    """Remove completed one-shot Git helpers left behind after interrupted requests."""
+    """Delegate one-shot Git helper cleanup to the broker."""
     try:
-        helpers = docker_client.containers.list(
-            all=True, filters={"label": "devbox.git_helper=true"}
-        )
-    except APIError:
-        logger.exception("Unable to enumerate temporary Git helper containers")
+        return broker_client.reconcile_git_helpers()
+    except BrokerUnavailable:
+        logger.exception("Unable to reconcile temporary Git helpers through broker")
         return 0
-
-    removed = 0
-    for helper in helpers:
-        try:
-            helper.reload()
-            if helper.status in {"exited", "dead"}:
-                helper.remove(force=True)
-                removed += 1
-        except NotFound:
-            continue
-        except DockerException:
-            logger.exception(
-                "Unable to clean up completed Git helper",
-                extra={"container_id": getattr(helper, "id", None)},
-            )
-    return removed
-
 
 async def reconciliation_loop() -> None:
     while True:
@@ -316,7 +268,11 @@ async def lifespan(_: FastAPI):
         logger.warning(
             "DEVBOX_EXECUTOR_TOKEN is not configured; internal calls will be rejected."
         )
-    ensure_image()
+    broker_client.validate_config()
+    try:
+        broker_client.ping()
+    except BrokerUnavailable as exc:
+        raise RuntimeError("Privileged broker is unavailable during worker startup.") from exc
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
         yield
@@ -331,9 +287,12 @@ app = FastAPI(title="DevBox Executor", version="0.1.0", lifespan=lifespan)
 @app.get("/health")
 def health() -> dict[str, str]:
     try:
-        docker_client.ping()
-    except DockerException as exc:
-        raise HTTPException(status_code=503, detail="Docker daemon unavailable.") from exc
+        broker_client.ping()
+    except BrokerUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Privileged broker unavailable.",
+        ) from exc
     return {"status": "ready"}
 
 
