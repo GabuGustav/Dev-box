@@ -81,8 +81,6 @@ services:
       - /tmp:rw,noexec,nosuid,size=128m
       - /run:rw,noexec,nosuid,size=16m
     depends_on:
-      egress-proxy:
-        condition: service_started
       broker:
         condition: service_healthy
     build:
@@ -105,7 +103,7 @@ services:
       DEVBOX_SNAPSHOT_MAX_BYTES: ${SNAPSHOT_MAX_BYTES:-10737418240}
       DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
     networks:
-      - default
+      - worker_api
       - broker_internal
     volumes:
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
@@ -129,6 +127,7 @@ services:
     networks:
       - default
       - api_proxy
+      - worker_api
     depends_on:
       db:
         condition: service_healthy
@@ -151,4 +150,7 @@ networks:
     internal: true
   broker_internal:
     name: devbox_broker_internal
+    internal: true
+  worker_api:
+    name: devbox_worker_api
     internal: true
