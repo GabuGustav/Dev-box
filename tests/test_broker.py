@@ -443,6 +443,41 @@ def test_broker_initializes_worker_state_with_restricted_permissions(tmp_path, m
     assert state.stat().st_mode & 0o777 == 0o700
 
 
+def test_broker_preserves_worker_instance_lock_file(tmp_path, monkeypatch):
+    state = tmp_path / "worker-state"
+    state.mkdir()
+    lock_file = state / "worker.lock"
+    lock_file.write_text("1234\\n", encoding="ascii")
+    monkeypatch.setattr(broker, "WORKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker.os, "chown", lambda *_args: None, raising=False)
+
+    broker.prepare_worker_state()
+
+    assert lock_file.read_text(encoding="ascii") == "1234\\n"
+    assert lock_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_broker_state_directory_is_private(tmp_path, monkeypatch):
+    state = tmp_path / "broker-state"
+    monkeypatch.setattr(broker, "BROKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker, "BROKER_LOCK_PATH", state / "broker.lock")
+    monkeypatch.setattr(broker.os, "chown", lambda *_args: None, raising=False)
+
+    broker.prepare_broker_state()
+
+    assert state.is_dir()
+    assert state.stat().st_mode & 0o777 == 0o700
+
+
+def test_broker_rejects_lock_outside_broker_state(tmp_path, monkeypatch):
+    state = tmp_path / "broker-state"
+    monkeypatch.setattr(broker, "BROKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker, "BROKER_LOCK_PATH", tmp_path / "broker.lock")
+
+    with pytest.raises(RuntimeError, match="must be stored in the broker-state volume"):
+        broker.prepare_broker_state()
+
+
 class FakeGitHelperContainer:
     def __init__(self):
         self.removed = False
