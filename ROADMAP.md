@@ -59,7 +59,7 @@ The implementation checklist and exit gates are tracked in [Phase 2 Security Har
 - [x] Expand proxy destination blocks to NAT64/6to4 and add a DNS-to-private integration test (CI pending).
 - [x] Add Docker runtime-profile assertions while retaining cross-workspace filesystem and PID isolation integration coverage (CI pending).
 - [x] Enforce one broker and one worker per deployment with advisory volume locks; reference-count workspace locks and configure one Uvicorn worker.
-- [ ] Run Phase 2.3 CI, fix any failures, and complete restore fault injection/fuzz coverage.
+- [ ] Run Phase 2.3 CI, fix any failures, and complete restore fault injection/fuzz coverage. Run 45874767681 passed the Linux XFS/Docker integration job and all image/Compose builds; Ruff found two E501 line-length violations before unit tests. The lint failures and CI's mutating import-fix step have been corrected; rerun verification is pending.
 - [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed in run 45864319247; extended recovery/fuzz drills remain).
 
 ## Phase 3 — Git and repository discovery
