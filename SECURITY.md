@@ -183,3 +183,8 @@ This verifies the current baseline and Phase 2.1 deployment hardening; it does *
 The `phase-2-privileged-broker` branch now contains a broker service skeleton, a separate broker token, an internal-only Compose network, fixed workspace container lifecycle operations, a Git helper command allowlist, and broker authorization/configuration tests.
 
 **This is not yet a privilege reduction in the running stack.** The worker still mounts `/var/run/docker.sock` and still receives `CAP_SYS_ADMIN`; the broker is an additional privileged service during migration. Do not deploy this intermediate branch as a hardened production release. The worker-to-broker migration and XFS quota delegation must complete before the worker's socket and capability are removed.
+
+
+The initial broker service skeleton passed CI run [45862764928](https://github.com/GabuGustav/Dev-box/actions/runs/45862764928): 132 tests passed, five were skipped in the quality job, Ruff and all image builds passed, and the separate XFS/Docker integration job passed all five integration tests. Broker-inclusive coverage is 69%.
+
+The broker's typed workspace and Git operations are not yet used by the worker. The worker still has its original Docker socket mount and `CAP_SYS_ADMIN`; no privilege reduction should be claimed until those are removed after migration.
