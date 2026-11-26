@@ -263,7 +263,6 @@ class XFSWorkspaceStorage:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
         self._migrate_legacy_registry()
-        self._migrate_legacy_registry()
         if not self.registry.exists():
             unexpected_entries = [
                 entry
@@ -362,6 +361,7 @@ class XFSWorkspaceStorage:
             raise WorkspaceStorageError("Staging directory already exists or is unsafe.")
         if project_id != self._project_id(workspace_id):
             raise WorkspaceStorageError("Staging project ID does not match the workspace.")
+        self._migrate_legacy_registry()
         if not self.registry.exists():
             unexpected_entries = [
                 entry
