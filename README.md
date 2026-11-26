@@ -6,7 +6,7 @@ DevBox is a model-agnostic platform where AI agents can work with real repositor
 
 ## Current status
 
-**Phase 3 implementation exists, and Phase 2 security remediation is in progress on `phase-2-security-hardening`; the privileged broker migration is isolated on `phase-2-privileged-broker`. The worker now delegates Docker lifecycle and Git helper execution to the private broker; its Docker socket and Docker SDK have been removed. The worker still retains `CAP_SYS_ADMIN` for XFS quota commands, which is the next migration step.** The broker migration has passed CI run 45864319247 (146 tests passed, five skipped, and all five Linux XFS/Docker integration tests passed). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
+**Phase 2 security hardening is continuing on `phase-2-xfs-quota-broker`, based on the successful `phase-2-privileged-broker` branch.** Docker lifecycle and XFS quota administration now run through the private typed broker; the worker has no Docker socket or `CAP_SYS_ADMIN`. This branch is implementing the final rootless-worker transition: UID/GID `10002:10001`, no Linux capabilities, read-only container root, isolated persistent worker state, and broker-owned snapshot restore swaps. These latest changes are awaiting CI verification. The parent broker branch passed CI run 45864319247 (146 tests passed, five skipped in quality; all five Linux XFS/Docker integration tests passed). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
 
 ## Core principles
 
@@ -30,6 +30,7 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 - [Workspace storage backend](STORAGE.md)
 - [Secure deployment](DEPLOYMENT.md)
 - [Phase 2 security hardening plan](docs/PHASE_2_SECURITY_HARDENING.md)
+- [Rootless worker implementation plan](docs/PHASE_2_2_3_ROOTLESS_WORKER.md)
 
 ## Stack
 
@@ -112,7 +113,7 @@ Workspace creation remains separate from provisioning. A workspace receives a st
 
 ## Isolation model and current limits
 
-The API does not mount the Docker socket. A separate privileged broker controls Docker and is the only service with access to the host Docker socket. The worker communicates with it over a private authenticated network. Workspace containers receive only their own dedicated bind-mounted directory on the XFS workspace filesystem. The worker still receives `CAP_SYS_ADMIN` to manage XFS project quotas; that capability will be removed when quota operations move behind the broker.
+The API and worker do not mount the Docker socket. A separate privileged broker controls Docker and XFS quota administration and is the only service with access to the host Docker socket and `CAP_SYS_ADMIN`. The worker communicates with it over a private authenticated network. The rootless-worker transition runs the worker as UID/GID `10002:10001`, drops all capabilities, and uses a read-only root filesystem. Workspace containers receive only their own dedicated bind-mounted directory on the XFS workspace filesystem.
 
 Workspace containers currently use:
 - A dedicated container and directory-tree project quota per workspace.
@@ -124,7 +125,7 @@ Workspace containers currently use:
 
 This is container-level isolation, not a VM boundary. The broker is host-privileged and must remain a trusted internal service. The worker remains trusted for cross-workspace storage access until storage operations are scoped per workspace. Never expose broker or worker ports publicly, and never mount the Docker socket into workspace containers.
 
-**Storage requirements:** the worker refuses to provision a workspace unless the configured storage root is on XFS with project quota accounting and enforcement enabled. The worker uses `xfs_quota` to assign a unique project ID, a hard block limit, and a hard inode limit before mounting the directory into a workspace container. A SQLite registry prevents two workspaces from accidentally sharing a project ID. The workspace storage root must be mounted into the worker at the same absolute path used by the Docker daemon. Docker Desktop and non-XFS local filesystems are not supported for actual workspace provisioning; use them for API/unit-test development only.
+**Storage requirements:** the broker refuses to provision a workspace unless the configured storage root is on XFS with project quota accounting and enforcement enabled. The broker uses `xfs_quota` to assign a unique project ID, a hard block limit, and a hard inode limit before mounting the directory into a workspace container. Broker-owned SQLite registries prevent project-ID collisions. The worker receives the XFS mounts only for workspace and snapshot file I/O; it cannot administer quotas or modify broker registries. Docker Desktop and non-XFS local filesystems are not supported for actual workspace provisioning; use them for API/unit-test development only.
 
 **Known Phase 2 gaps:** quota-aware backup/restore drills, adversarial host-escape tests, and real-host integration verification remain incomplete. A periodic worker safety loop checks managed container mounts and stops containers whose storage no longer matches. The API also polls the trusted executor every `LIFECYCLE_RECONCILE_INTERVAL_SECONDS` (default 60) for running, paused, or recovering workspaces, synchronizes authoritative container state into PostgreSQL, and records changes in the audit log. If the executor is unavailable, reconciliation leaves existing database state unchanged. Encrypted snapshot create/list/restore/delete endpoints are implemented; they require a second dedicated XFS snapshot mount and a persistent encryption key. Workspace containers remain offline by default. A separate, non-published Squid proxy and internal-only helper network provide allowlisted egress for temporary Git helper containers. Git clone and fetch run through that proxy; local status, diff, branch, and commit helpers use `network_mode=none`. Git helper containers use the same unprivileged workspace UID, read-only root filesystem, CPU/memory/PID limits, and only the selected workspace bind mount. Git operations currently support public HTTPS repositories on GitHub, GitLab, and Bitbucket. Private repository credentials and Git push are deliberately withheld until a short-lived credential broker is implemented. The commit API only commits already-staged files unless explicit relative paths are supplied; it never stages the entire workspace implicitly. Do not treat this branch as production-hardened multi-tenant infrastructure.
 
