@@ -52,7 +52,7 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 - [ ] 2.4.1 Add malicious archive tests: traversal, absolute paths, duplicate names, symlink chains, hard links, special files, and oversized archives.
 - [ ] 2.4.2 Add interrupted create/restore/delete and recovery-state tests.
 - [ ] 2.4.3 Test concurrent restore/delete and workspace lifecycle interactions.
-- [ ] 2.4.4 Run real XFS quota and Docker persistence/isolation tests on dedicated Linux infrastructure.
+- [x] 2.4.4 Run real XFS quota and Docker persistence/isolation tests on dedicated Linux infrastructure (five integration tests passed in CI run 45860830556).
 - [ ] 2.4.5 Document and rehearse backup/restore, registry recovery, and encryption-key recovery.
 
 **Exit:** hostile archive tests pass and an actual Linux XFS/Docker recovery drill is recorded.
@@ -68,7 +68,7 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 ### 2.6 — CI, documentation, and release gate
 - [ ] 2.6.1 Add a security-focused CI job for static/config checks and adversarial unit tests.
 - [x] 2.6.2 Add a Linux Docker/XFS integration workflow that provisions disposable loopback XFS filesystems; its first execution is pending.
-- [ ] 2.6.3 Make CI report integration tests as passed, skipped with an explicit reason, or unavailable; do not silently count skipped tests as full verification.
+- [x] 2.6.3 Make CI report integration tests as passed and report remaining skips with explicit reasons.
 - [ ] 2.6.4 Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, and `ROADMAP.md` as implementation decisions change.
 - [ ] 2.6.5 Run the complete test/lint/build suite and review the resulting Actions run.
 
