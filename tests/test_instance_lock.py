@@ -3,7 +3,7 @@ import stat
 
 import pytest
 
-from worker import instance_lock
+import worker.instance_lock as instance_lock
 
 
 pytestmark = pytest.mark.skipif(
