@@ -414,3 +414,98 @@ def test_snapshot_restore_rejects_symlink_parent_chain(tmp_path, monkeypatch):
     assert not (workspace / "partial.txt").exists()
     assert not (workspace / "link").is_symlink()
     assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+@pytest.mark.parametrize(
+    "entry_type",
+    [tarfile.LNKTYPE, tarfile.CHRTYPE, tarfile.BLKTYPE, tarfile.FIFOTYPE],
+)
+def test_snapshot_restore_rejects_hardlinks_and_special_entries(
+    tmp_path, monkeypatch, entry_type
+):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("unsupported-entry")
+        member.type = entry_type
+        member.linkname = "keep.txt"
+        member.devmajor = 1
+        member.devminor = 1
+        archive.addfile(member)
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_duplicate_normalized_paths(tmp_path, monkeypatch):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        for name in ("./duplicate.txt", "duplicate.txt"):
+            member = tarfile.TarInfo(name)
+            member.size = 1
+            archive.addfile(member, io.BytesIO(b"x"))
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError, match="duplicate archive paths"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not (workspace / "duplicate.txt").exists()
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_file_as_parent_path(tmp_path, monkeypatch):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        parent_file = tarfile.TarInfo("node")
+        parent_file.size = 1
+        archive.addfile(parent_file, io.BytesIO(b"x"))
+        child_file = tarfile.TarInfo("node/child.txt")
+        child_file.size = 1
+        archive.addfile(child_file, io.BytesIO(b"y"))
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
