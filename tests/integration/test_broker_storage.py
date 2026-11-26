@@ -97,12 +97,13 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
                     exceeded = True
                     break
         assert exceeded, "Broker did not enforce the workspace XFS hard quota."
+        (workspace_path / "quota-probe.bin").unlink()
 
         assert workspace_path.stat().st_gid == 10001
         assert workspace_path.stat().st_mode & 0o2070 == 0o2070
         worker_write = workspace_path / "worker-created.txt"
         worker_result = run_as(
-            10002, 10001, "import sys; open(sys.argv[1], 'w').write('worker')", str(worker_write)
+            10002, 10001, "import sys,os; p=sys.argv[1]; open(p, 'w').write('worker'); os.chmod(p, 0o660)", str(worker_write)
         )
         assert worker_result.returncode == 0, worker_result.stderr
         runtime_result = run_as(
@@ -114,8 +115,8 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
             10002,
             10001,
             "import sys; p=sys.argv[1]; "
-            "f=open(p, 'x') if False else None; "
-            "sys.exit(0 if not __import__('os').access(__import__('os').path.dirname(p), 2) else 1)",
+            "try: open(p, 'x').close(); sys.exit(1) "
+            "except PermissionError: sys.exit(0)",
             str(Path(WORKSPACE_ROOT) / ".worker-root-write-probe"),
         )
         assert denied.returncode == 0, denied.stderr
