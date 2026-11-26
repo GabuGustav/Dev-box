@@ -33,7 +33,8 @@ class BrokerClient:
         timeout_seconds: float = 30,
         git_timeout_seconds: float = 330,
     ) -> None:
-        self.base_url = (base_url or os.getenv("DEVBOX_BROKER_URL", "http://broker:9100")).rstrip("/")
+        configured_url = base_url or os.getenv("DEVBOX_BROKER_URL", "http://broker:9100")
+        self.base_url = configured_url.rstrip("/")
         self.token = token if token is not None else os.getenv("DEVBOX_BROKER_TOKEN", "")
         self.timeout_seconds = timeout_seconds
         self.git_timeout_seconds = git_timeout_seconds
