@@ -10,4 +10,4 @@ COPY worker ./worker
 COPY workspace-image ./workspace-image
 ENV DEVBOX_WORKSPACE_IMAGE_CONTEXT=/opt/devbox/workspace-image
 EXPOSE 9100
-CMD ["uvicorn", "broker.main:app", "--host", "0.0.0.0", "--port", "9100"]
+CMD ["uvicorn", "broker.main:app", "--host", "0.0.0.0", "--port", "9100", "--workers", "1"]
