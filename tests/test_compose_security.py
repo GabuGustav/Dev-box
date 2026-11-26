@@ -20,3 +20,9 @@ def test_compose_api_is_localhost_bound_by_default():
     assert compose["services"]["api"]["ports"] == [
         "${API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
     ]
+
+def test_api_has_dedicated_internal_reverse_proxy_network():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    assert "api_proxy" in compose["services"]["api"]["networks"]
+    assert compose["networks"]["api_proxy"]["internal"] is True
+    assert compose["networks"]["api_proxy"]["name"] == "devbox_api_proxy"
