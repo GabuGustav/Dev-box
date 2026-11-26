@@ -150,6 +150,8 @@ class XFSWorkspaceStorage:
     def _connect(self) -> sqlite3.Connection:
         if self.registry.is_symlink():
             raise WorkspaceStorageError("Workspace project registry is an unexpected symlink.")
+        if self.registry.exists() and not self.registry.is_file():
+            raise WorkspaceStorageError("Workspace project registry is not a regular file.")
         self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30, isolation_level=None)
         connection.execute(
