@@ -291,10 +291,10 @@ async def lifespan(_: FastAPI):
         )
     broker_client.validate_config()
     try:
-        broker_client.ping()
-    except BrokerUnavailable as exc:
+        broker_client.validate_connection()
+    except BrokerError as exc:
         raise RuntimeError(
-            "Privileged broker is unavailable during worker startup."
+            "Privileged broker authentication/readiness check failed."
         ) from exc
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
@@ -311,11 +311,11 @@ app = FastAPI(title="DevBox Executor", version="0.1.0", lifespan=lifespan)
 @app.get("/health")
 def health() -> dict[str, str]:
     try:
-        broker_client.ping()
-    except BrokerUnavailable as exc:
+        broker_client.validate_connection()
+    except BrokerError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Privileged broker unavailable.",
+            detail="Privileged broker unavailable or unauthorized.",
         ) from exc
     return {"status": "ready"}
 
