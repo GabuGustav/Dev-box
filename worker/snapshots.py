@@ -164,15 +164,18 @@ class SnapshotStore:
         try:
             self.registry.parent.mkdir(parents=True, exist_ok=True)
             source = sqlite3.connect(legacy.resolve().as_uri() + "?mode=ro", uri=True)
-            destination = sqlite3.connect(temporary)
             try:
-                source.backup(destination)
-                destination.commit()
+                destination = sqlite3.connect(temporary)
+                try:
+                    source.backup(destination)
+                    destination.commit()
+                finally:
+                    destination.close()
             finally:
-                destination.close()
                 source.close()
             temporary.chmod(0o600)
             os.replace(temporary, self.registry)
+            self._fsync_directory(self.registry.parent)
         except (OSError, sqlite3.Error) as exc:
             temporary.unlink(missing_ok=True)
             raise SnapshotError("Unable to migrate the legacy snapshot metadata registry.") from exc
