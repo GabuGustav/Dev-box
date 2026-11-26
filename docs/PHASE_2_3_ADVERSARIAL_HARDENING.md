@@ -84,7 +84,7 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Keep multi-replica deployments explicitly unsupported until distributed locking is implemented.
 
 ### 2.3.6 — CI, documentation, and exit gate
-- [ ] Run Ruff, unit tests, Compose validation, all image builds, and Linux Docker/XFS/proxy integration (run 45906814016: Ruff, all four image builds, Compose validation, and Linux XFS/Docker integration passed; unit tests reported 198 passed, 8 skipped, 3 failures; fixes committed, rerun pending).
+- [x] Run Ruff, unit tests, Compose validation, all image builds, and Linux Docker/XFS/proxy integration (run 45907271567 passed: Ruff clean, four images built, Compose valid, 201 unit tests passed, 8 opt-in tests skipped in the quality job, and the dedicated Linux XFS/Docker integration job passed).
 - [ ] Ensure CI reports all test counts, skips, and integration results.
 - [x] Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and this plan.
 - [x] Record remaining risks accurately; do not claim hostile-tenant isolation.
