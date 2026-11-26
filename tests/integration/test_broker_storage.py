@@ -106,9 +106,12 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
         denied = run_as(
             10002,
             10001,
-            "import sys; "
-            "try: open(sys.argv[1], 'x').close(); sys.exit(1) "
-            "except PermissionError: sys.exit(0)",
+            "import sys\n"
+            "try:\n"
+            "    open(sys.argv[1], 'x').close()\n"
+            "except PermissionError:\n"
+            "    sys.exit(0)\n"
+            "sys.exit(1)",
             str(Path(WORKSPACE_ROOT) / ".worker-root-write-probe"),
         )
         assert denied.returncode == 0, denied.stderr
