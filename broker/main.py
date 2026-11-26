@@ -889,6 +889,17 @@ def api_mark_storage_initialized(
     return {"workspace_id": workspace_id, "status": "initialized"}
 
 
+def _fsync_storage_root(root: Path) -> None:
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    if directory_flag is None:
+        return
+    descriptor = os.open(root, os.O_RDONLY | directory_flag)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 @app.post(
     "/internal/storage/{storage_kind}/{workspace_id}/recover-restore",
     dependencies=[Depends(require_service_token)],
@@ -907,6 +918,7 @@ def api_recover_storage_restore(
             raise HTTPException(status_code=409, detail="Restore path is unsafe.")
         if path.parent.resolve() != storage.root.resolve():
             raise HTTPException(status_code=409, detail="Restore path escaped its storage root.")
+    restore_state_exists = backup.exists() or stage.exists()
     try:
         if backup.exists():
             if workspace.exists():
@@ -914,11 +926,13 @@ def api_recover_storage_restore(
                 shutil.rmtree(backup)
             else:
                 os.replace(backup, workspace)
+                _fsync_storage_root(storage.root)
                 storage.mark_workspace_initialized(workspace_id, workspace)
         if stage.exists():
             shutil.rmtree(stage)
         if workspace.exists():
             storage.mark_workspace_initialized(workspace_id, workspace)
+        if workspace.exists() or restore_state_exists:
             storage.set_project_quota(workspace_id, multiplier=1)
     except (OSError, WorkspaceStorageError) as exc:
         raise HTTPException(status_code=503, detail="Unable to recover workspace restore.") from exc
@@ -948,8 +962,10 @@ def api_commit_storage_restore(
     try:
         if workspace.exists():
             os.replace(workspace, backup)
+            _fsync_storage_root(storage.root)
         try:
             os.replace(stage, workspace)
+            _fsync_storage_root(storage.root)
             storage.mark_workspace_initialized(workspace_id, workspace)
             storage.set_project_quota(workspace_id, multiplier=1)
         except Exception:
@@ -957,11 +973,13 @@ def api_commit_storage_restore(
                 shutil.rmtree(workspace)
             if backup.exists():
                 os.replace(backup, workspace)
+                _fsync_storage_root(storage.root)
                 storage.mark_workspace_initialized(workspace_id, workspace)
                 storage.set_project_quota(workspace_id, multiplier=1)
             raise
         if backup.exists():
             shutil.rmtree(backup)
+            _fsync_storage_root(storage.root)
     except (OSError, WorkspaceStorageError) as exc:
         raise HTTPException(status_code=503, detail="Unable to commit workspace restore.") from exc
     return {"workspace_id": workspace_id, "state": "restored"}
