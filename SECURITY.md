@@ -193,7 +193,7 @@ The branch changes:
 - Snapshot restore directory commit and interrupted-restore recovery to broker RPC, including mount-root fsync.
 - Worker container policy retains all-capability drop, `no-new-privileges`, read-only root, bounded tmpfs, and resource limits.
 
-The rootless-worker code and tests are committed on this branch; CI verification is pending. The worker still has group-based read/write access to all workspace and snapshot directories. It is therefore not a hostile-tenant isolation boundary.
+The rootless-worker code and tests are committed and verified on this branch by CI run [45870278489](https://github.com/GabuGustav/Dev-box/actions/runs/45870278489): 174 unit tests passed, seven were skipped in quality, Ruff/Compose/image builds passed, and all seven Linux XFS/Docker integration tests passed. The worker still has group-based read/write access to all workspace and snapshot directories. It is therefore not a hostile-tenant isolation boundary.
 
 ### Remaining security work
 
