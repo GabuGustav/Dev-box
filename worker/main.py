@@ -721,8 +721,8 @@ def git_fetch(workspace_id: str, payload: GitRepositoryRequest) -> dict:
 )
 @serialize_workspace_operation
 def get_workspace_status(workspace_id: str) -> dict:
-    """Return the executor's authoritative state after validating its storage binding."""
-    container_name, storage_name = names_for(workspace_id)
+    """Return executor state after broker-side storage/container validation."""
+    _, storage_name = names_for(workspace_id)
     try:
         snapshot_store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
@@ -730,16 +730,25 @@ def get_workspace_status(workspace_id: str) -> dict:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        container = docker_client.containers.get(container_name)
-        container.reload()
-    except NotFound:
+        container = broker_call(lambda: broker_client.get_workspace(workspace_id))
+    except BrokerNotFound:
         return {
             "workspace_id": workspace_id,
             "container_id": None,
             "storage_ref": storage_name,
             "state": "absent",
         }
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            return {
+                "workspace_id": workspace_id,
+                "container_id": None,
+                "storage_ref": storage_name,
+                "state": "failed",
+            }
+        raise
 
+    container.reload()
     labels = container.attrs.get("Config", {}).get("Labels") or {}
     mounts = container.attrs.get("Mounts", [])
     workspace_mount = next(
@@ -749,7 +758,7 @@ def get_workspace_status(workspace_id: str) -> dict:
     if (
         labels.get("devbox.managed") != "true"
         or labels.get("devbox.workspace_id") != workspace_id
-        or container.name != container_name
+        or container.name != names_for(workspace_id)[0]
         or workspace_mount is None
         or workspace_mount.get("Source") != str(workspace_path)
     ):
