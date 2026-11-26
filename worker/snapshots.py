@@ -157,7 +157,6 @@ class SnapshotStore:
     def _workspace_directory(self, workspace_id: str) -> Path:
         directory = self.storage.ensure_workspace(workspace_id)
         try:
-            self.storage.owner_setter(directory, 0, 0)
             directory.chmod(0o700)
         except OSError as exc:
             raise SnapshotError("Unable to secure the snapshot directory.") from exc
