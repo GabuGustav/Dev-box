@@ -6,6 +6,7 @@ import hmac
 import logging
 import os
 import re
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -33,6 +34,9 @@ SNAPSHOT_STORAGE_ROOT = Path(
 BROKER_STATE_ROOT = Path(
     os.getenv("DEVBOX_BROKER_STATE_ROOT", "/var/lib/devbox-broker")
 )
+WORKER_STATE_ROOT = Path(
+    os.getenv("DEVBOX_WORKER_STATE_ROOT", "/var/lib/devbox-worker")
+)
 WORKSPACE_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
 SNAPSHOT_QUOTA = os.getenv("DEVBOX_SNAPSHOT_DISK_QUOTA", "20g")
 WORKSPACE_INODE_LIMIT = int(os.getenv("DEVBOX_WORKSPACE_INODE_LIMIT", "200000"))
@@ -57,7 +61,7 @@ storage_backends = {
         WORKSPACE_INODE_LIMIT,
         registry_path=BROKER_STATE_ROOT / "workspace-projects.sqlite3",
         shared_group_id=10001,
-        directory_mode=0o770,
+        directory_mode=0o2770,
     ),
     "snapshot": XFSWorkspaceStorage(
         str(SNAPSHOT_STORAGE_ROOT),
@@ -65,6 +69,7 @@ storage_backends = {
         SNAPSHOT_INODE_LIMIT,
         registry_path=BROKER_STATE_ROOT / "snapshot-projects.sqlite3",
         shared_group_id=10001,
+        directory_mode=0o2770,
     ),
 }
 
@@ -646,11 +651,65 @@ async def reconciliation_loop() -> None:
         await asyncio.sleep(max(5, int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))))
 
 
+def prepare_worker_state() -> None:
+    if WORKER_STATE_ROOT.is_symlink():
+        raise RuntimeError("Worker state root must not be a symbolic link.")
+    WORKER_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    if not WORKER_STATE_ROOT.is_dir():
+        raise RuntimeError("Worker state root must be a directory.")
+    os.chown(WORKER_STATE_ROOT, 10002, 10001)
+    WORKER_STATE_ROOT.chmod(0o700)
+    allowed_files = {
+        "snapshots.sqlite3",
+        "snapshots.sqlite3-journal",
+        "snapshots.sqlite3-wal",
+        "snapshots.sqlite3-shm",
+    }
+    for entry in WORKER_STATE_ROOT.iterdir():
+        if entry.is_symlink() or not entry.is_file():
+            raise RuntimeError("Worker state contains an unexpected entry.")
+        if entry.name.startswith("snapshots.sqlite3.migrating"):
+            entry.unlink()
+            continue
+        if entry.name not in allowed_files:
+            raise RuntimeError("Worker state contains an unexpected entry.")
+        os.chown(entry, 10002, 10001)
+        entry.chmod(0o600)
+
+
+def prepare_shared_storage_permissions(storage: XFSWorkspaceStorage) -> None:
+    root = storage.root
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError("Configured XFS storage root is missing or unsafe.")
+    # validate_backend has already assigned root:10001 ownership and mode 2750.
+    if root.stat().st_uid != 0 or root.stat().st_gid != 10001:
+        raise RuntimeError("XFS storage root does not have broker-owned group permissions.")
+    root.chmod(0o2750)
+    legacy_metadata = root / ".devbox-snapshots.sqlite3"
+    if legacy_metadata.exists() or legacy_metadata.is_symlink():
+        if legacy_metadata.is_symlink() or not legacy_metadata.is_file():
+            raise RuntimeError("Legacy snapshot metadata registry is unsafe.")
+        journal = legacy_metadata.with_name(legacy_metadata.name + "-journal")
+        if journal.exists() or journal.is_symlink():
+            raise RuntimeError("Legacy snapshot metadata has an unfinished SQLite journal.")
+        os.chown(legacy_metadata, 0, 10001)
+        legacy_metadata.chmod(0o640)
+        for suffix in ("-wal", "-shm"):
+            sidecar = legacy_metadata.with_name(legacy_metadata.name + suffix)
+            if sidecar.exists() or sidecar.is_symlink():
+                if sidecar.is_symlink() or not sidecar.is_file():
+                    raise RuntimeError("Legacy snapshot metadata sidecar is unsafe.")
+                os.chown(sidecar, 0, 10001)
+                sidecar.chmod(0o640)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_service_token()
     for storage in storage_backends.values():
         storage.validate_backend()
+        prepare_shared_storage_permissions(storage)
+    prepare_worker_state()
     ensure_image()
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
@@ -858,6 +917,104 @@ def api_mark_storage_initialized(
         lambda: storage.mark_workspace_initialized(workspace_id, directory)
     )
     return {"workspace_id": workspace_id, "status": "initialized"}
+
+
+def _fsync_storage_root(root: Path) -> None:
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    if directory_flag is None:
+        return
+    descriptor = os.open(root, os.O_RDONLY | directory_flag)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@app.post(
+    "/internal/storage/{storage_kind}/{workspace_id}/recover-restore",
+    dependencies=[Depends(require_service_token)],
+)
+def api_recover_storage_restore(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+) -> dict[str, str]:
+    storage = _storage_for(storage_kind)
+    _storage_operation(storage.validate_backend)
+    _, workspace = storage._workspace_path(workspace_id)
+    stage = storage.root / f".{workspace.name}.restore-stage"
+    backup = storage.root / f".{workspace.name}.restore-backup"
+    for path in (workspace, stage, backup):
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise HTTPException(status_code=409, detail="Restore path is unsafe.")
+        if path.parent.resolve() != storage.root.resolve():
+            raise HTTPException(status_code=409, detail="Restore path escaped its storage root.")
+    restore_state_exists = backup.exists() or stage.exists()
+    try:
+        if backup.exists():
+            if workspace.exists():
+                storage.mark_workspace_initialized(workspace_id, workspace)
+                shutil.rmtree(backup)
+            else:
+                os.replace(backup, workspace)
+                _fsync_storage_root(storage.root)
+                storage.mark_workspace_initialized(workspace_id, workspace)
+        elif workspace.exists():
+            storage.mark_workspace_initialized(workspace_id, workspace)
+        if stage.exists():
+            shutil.rmtree(stage)
+        if workspace.exists() or restore_state_exists:
+            storage.set_project_quota(workspace_id, multiplier=1)
+        if restore_state_exists:
+            _fsync_storage_root(storage.root)
+    except (OSError, WorkspaceStorageError) as exc:
+        raise HTTPException(status_code=503, detail="Unable to recover workspace restore.") from exc
+    return {"workspace_id": workspace_id, "state": "recovered"}
+
+
+@app.post(
+    "/internal/storage/{storage_kind}/{workspace_id}/commit-restore",
+    dependencies=[Depends(require_service_token)],
+)
+def api_commit_storage_restore(
+    storage_kind: Literal["workspace", "snapshot"],
+    workspace_id: str,
+) -> dict[str, str]:
+    storage = _storage_for(storage_kind)
+    _storage_operation(storage.validate_backend)
+    _, workspace = storage._workspace_path(workspace_id)
+    stage = storage.root / f".{workspace.name}.restore-stage"
+    backup = storage.root / f".{workspace.name}.restore-backup"
+    for path in (workspace, stage, backup):
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise HTTPException(status_code=409, detail="Restore path is unsafe.")
+        if path.parent.resolve() != storage.root.resolve():
+            raise HTTPException(status_code=409, detail="Restore path escaped its storage root.")
+    if not stage.is_dir() or backup.exists():
+        raise HTTPException(status_code=409, detail="Restore staging state is invalid.")
+    try:
+        if workspace.exists():
+            os.replace(workspace, backup)
+            _fsync_storage_root(storage.root)
+        try:
+            os.replace(stage, workspace)
+            _fsync_storage_root(storage.root)
+            storage.mark_workspace_initialized(workspace_id, workspace)
+            storage.set_project_quota(workspace_id, multiplier=1)
+        except Exception:
+            if workspace.exists() and backup.exists():
+                shutil.rmtree(workspace)
+            if backup.exists():
+                os.replace(backup, workspace)
+                _fsync_storage_root(storage.root)
+                storage.mark_workspace_initialized(workspace_id, workspace)
+                storage.set_project_quota(workspace_id, multiplier=1)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+            _fsync_storage_root(storage.root)
+    except (OSError, WorkspaceStorageError) as exc:
+        raise HTTPException(status_code=503, detail="Unable to commit workspace restore.") from exc
+    return {"workspace_id": workspace_id, "state": "restored"}
 
 
 @app.delete(

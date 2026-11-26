@@ -1,79 +1,76 @@
 # Phase 2 Security Hardening Plan
 
-**Branch:** `phase-2-security-hardening`  
-**Base:** `phase-2-isolated-workspaces` (branch ref at branch creation)  
-**Status:** Investigation complete; remediation not yet verified  
-**Scope:** Close deployment-default exposure, reduce privileged-worker blast radius, validate container and storage isolation, and make security checks repeatable in CI.
+**Investigation branch:** `phase-2-security-hardening`  
+**Broker branch:** `phase-2-privileged-broker`  
+**Current hardening branch:** `phase-2-rootless-worker-hardening`  
+**Current base commit:** `088364d3bffd7fb03bc9010bd1be9057824bffb1`  
+**Base CI:** [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) passed.  
+**Status:** Deployment hardening, broker migration, and rootless-worker storage hardening are verified. Adversarial archive, egress, cross-workspace, and concurrency work remains.
 
-## Baseline findings
+## Baseline findings and current disposition
 
-The source audit confirmed the following issues or verification gaps:
-
-1. PostgreSQL is published on host port 5432 with static `devbox/devbox` credentials in Compose.
-2. The API is published on host port 8000 and runs plain HTTP directly. This is acceptable only for a trusted local development deployment, not an internet-facing deployment.
-3. The worker mounts the Docker socket and receives `CAP_SYS_ADMIN` to administer XFS quotas. A worker compromise can become host compromise. This is an architectural trust-boundary risk, not a demonstrated remote exploit.
-4. Workspace containers have meaningful hardening (non-root UID, dropped capabilities, read-only root filesystem, no-new-privileges, private PID/IPC, resource limits, and no network by default), but explicit runtime-profile and tenant-boundary adversarial verification is incomplete.
+1. PostgreSQL was published on host port 5432 with static `devbox/devbox` credentials. **Remediated:** PostgreSQL is internal-only and Compose requires deployment-specific `DB_PASSWORD`.
+2. The API was published on host port 8000 over direct HTTP. **Remediated by default:** API binds to host loopback; external deployments still require TLS termination at a trusted reverse proxy.
+3. The worker mounted the Docker socket and received `CAP_SYS_ADMIN`. **Remediated by broker migration:** the broker alone owns Docker socket and XFS authority. The current branch further separates worker UID/GID from workspace runtime and prevents worker writes to XFS mount roots.
+4. Workspace containers have meaningful hardening (non-root UID, dropped capabilities, read-only root, no-new-privileges, private PID/IPC, resource limits, and no network by default), but explicit runtime-profile and tenant-boundary adversarial verification remains incomplete.
 5. Egress proxy protections exist, but DNS rebinding, IPv4/IPv6 private-address bypass, and proxy bypass require adversarial tests.
 6. Per-workspace operation locks are in-process only; multiple worker processes/replicas are not safe without distributed coordination.
-7. Snapshot code has encryption and archive validation controls, but real XFS/Docker recovery drills and adversarial archive tests remain incomplete.
-8. The existing CI workflow runs quality/unit tests but does not provide a dedicated security integration lane. The five Linux/XFS/Docker-dependent tests were previously reported skipped; this must be verified on a capable runner.
+7. Snapshot code has encryption and archive validation controls, but malicious archive tests, interrupted restore tests, and real recovery drills remain incomplete.
+8. Dedicated Linux XFS/Docker integration exists and passed its five-test baseline. The current rootless-worker changes need a fresh run on the branch.
 
 These findings distinguish confirmed unsafe defaults from risks that still require exploitability testing. No host escape or snapshot extraction exploit has been demonstrated by source review alone.
 
 ## Phases and subphases
 
 ### 2.1 — Deployment exposure and secret hygiene
-- [x] 2.1.1 Remove PostgreSQL host-port publishing; keep DB reachable only on the Compose service network.
-- [x] 2.1.2 Replace hard-coded DB credentials with required environment inputs and reject known placeholder values in production configuration.
-- [x] 2.1.3 Preserve a documented local-development path with localhost-only API binding by default.
-- [x] 2.1.4 Document TLS termination at a reverse proxy for non-local deployments.
-- [x] 2.1.5 Add Compose/configuration tests for secure defaults and missing/placeholder secrets (108 tests passed in run 45860295750; the subsequent internal-proxy-network assertion is awaiting the next run).
+- [x] Remove PostgreSQL host-port publishing.
+- [x] Replace hard-coded DB credentials with required environment inputs and reject placeholders in production configuration.
+- [x] Preserve localhost-only API binding by default.
+- [x] Document TLS termination for non-local deployments.
+- [x] Add Compose/configuration tests and verify in CI runs 45860830556 and 45868184349.
 
-**Exit:** no public database listener by default; no committed production credentials; secure deployment requirements are executable and documented.
+### 2.2 — Privileged broker and worker boundary
 
-### 2.2 — Privileged worker boundary
-Detailed implementation plan: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md). Work is isolated on branch `phase-2-privileged-broker`.
-- [x] 2.2.1 Map every operation requiring Docker API access and XFS administration.
-- [ ] 2.2.2 Design a narrow privileged host broker for the minimum Docker/XFS operations, with typed requests, strict workspace/path validation, and no arbitrary Docker API passthrough.
-- [ ] 2.2.3 Separate unprivileged worker orchestration from the privileged broker.
-- [ ] 2.2.4 Authenticate broker calls, restrict its network reachability, and add audit logging.
-- [ ] 2.2.5 Add negative tests proving the broker cannot be used for arbitrary container creation, host path access, or cross-workspace operations.
+Detailed plans: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md) and [Rootless Worker](PHASE_2_2_3_ROOTLESS_WORKER.md).
 
-**Exit:** general worker process no longer has direct Docker socket access or `CAP_SYS_ADMIN`; broker API is narrowly scoped and tested. Do not implement until the broker contract and operational failure modes are reviewed.
+- [x] 2.2.1 Inventory privileged operations and define typed broker contracts.
+- [x] 2.2.2 Add a private broker, separate service token, fixed Docker operations, and workspace-scoped XFS RPC.
+- [x] 2.2.3 Move XFS mount/project/quota administration behind broker; worker no longer has `CAP_SYS_ADMIN`.
+- [x] 2.2.4 Move Docker lifecycle, image builds, Git helper containers, and reconciliation behind broker; worker no longer mounts Docker socket or imports Docker SDK.
+- [ ] 2.2.5 Complete hostile Git configuration, timeout/output, and arbitrary helper capability tests.
+- [x] 2.2.6 Implement and verify dedicated worker UID/GID `10002:10001`, all-capability drop, `no-new-privileges`, read-only root, isolated worker state, non-writable XFS mount roots, and broker-owned restore swaps (CI run 45870278489 passed).
+- [x] 2.2.7 Complete current-branch CI and release documentation.
+- [ ] Complete adversarial Git/archive/egress/cross-workspace/concurrency tests.
+
+**Verified broker evidence:** CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed 146 unit tests (five skipped in quality) and all five Linux XFS/Docker integration tests. The latest base CI run [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) passed quality, image builds, Compose validation, and integration.
+
+**Remaining trust boundary:** the worker still has group-based read/write access to all workspace and snapshot directories on shared XFS mounts. This is not hostile-tenant isolation.
 
 ### 2.3 — Workspace runtime isolation
-- [ ] 2.3.1 Select and pin explicit seccomp and AppArmor/SELinux policy where supported; retain safe runtime defaults.
-- [ ] 2.3.2 Evaluate Docker user namespaces/idmapped mounts and per-workspace host identity separation.
-- [ ] 2.3.3 Add adversarial cross-workspace filesystem/process/device/mount tests.
-- [ ] 2.3.4 Evaluate rootless execution and microVMs against the XFS quota requirements; document trade-offs rather than claiming container isolation is a VM boundary.
-
-**Exit:** runtime policy is explicit, tested on supported Linux hosts, and limitations are documented.
+- [ ] Pin explicit seccomp and AppArmor/SELinux policy where supported; retain safe runtime defaults.
+- [ ] Evaluate Docker user namespaces/idmapped mounts and per-workspace host identity separation.
+- [ ] Add adversarial cross-workspace filesystem/process/device/mount tests.
+- [ ] Evaluate microVMs against XFS quota requirements and document the trade-offs.
 
 ### 2.4 — Snapshot and storage verification
-- [ ] 2.4.1 Add malicious archive tests: traversal, absolute paths, duplicate names, symlink chains, hard links, special files, and oversized archives.
-- [ ] 2.4.2 Add interrupted create/restore/delete and recovery-state tests.
-- [ ] 2.4.3 Test concurrent restore/delete and workspace lifecycle interactions.
-- [x] 2.4.4 Run real XFS quota and Docker persistence/isolation tests on dedicated Linux infrastructure (five integration tests passed in CI run 45860830556).
-- [ ] 2.4.5 Document and rehearse backup/restore, registry recovery, and encryption-key recovery.
-
-**Exit:** hostile archive tests pass and an actual Linux XFS/Docker recovery drill is recorded.
+- [ ] Add malicious archive tests: traversal, absolute paths, duplicate names, symlink chains, hard links, special files, and oversized archives.
+- [ ] Add interrupted create/restore/delete and recovery-state tests.
+- [ ] Test concurrent restore/delete and workspace lifecycle interactions.
+- [x] Run real XFS quota and Docker persistence/isolation tests on dedicated Linux infrastructure (five integration tests passed in run 45864319247).
+- [ ] Document and rehearse backup/restore, registry recovery, and encryption-key recovery.
 
 ### 2.5 — Network and concurrency controls
-- [ ] 2.5.1 Test proxy bypass, DNS rebinding, redirects, IPv4/IPv6 private/link-local/loopback destinations, and metadata endpoints.
-- [ ] 2.5.2 Harden proxy destination resolution and connection-time IP validation where tests expose gaps.
-- [ ] 2.5.3 Add tests for worker crash, simultaneous lifecycle/snapshot/delete calls, and stale reconciliation.
-- [ ] 2.5.4 Replace process-local locks before enabling multiple worker processes or replicas; otherwise enforce and document a single-process deployment invariant.
-
-**Exit:** egress bypass tests pass; concurrency model is safe for the declared deployment topology.
+- [ ] Test proxy bypass, DNS rebinding, redirects, IPv4/IPv6 private/link-local/loopback destinations, and metadata endpoints.
+- [ ] Harden proxy destination resolution and connection-time IP validation where tests expose gaps.
+- [ ] Add tests for worker crash, simultaneous lifecycle/snapshot/delete calls, and stale reconciliation.
+- [ ] Replace process-local locks before enabling multiple worker processes or replicas; otherwise enforce a single-process deployment invariant.
 
 ### 2.6 — CI, documentation, and release gate
-- [ ] 2.6.1 Add a security-focused CI job for static/config checks and adversarial unit tests.
-- [x] 2.6.2 Add a Linux Docker/XFS integration workflow that provisions disposable loopback XFS filesystems; its first execution is pending.
-- [x] 2.6.3 Make CI report integration tests as passed and report remaining skips with explicit reasons.
-- [ ] 2.6.4 Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, and `ROADMAP.md` as implementation decisions change.
-- [ ] 2.6.5 Run the complete test/lint/build suite and review the resulting Actions run.
-
-**Exit:** all required unit/security tests pass; integration verification is green on supported Linux infrastructure; documentation matches the implemented design.
+- [ ] Add security-focused CI jobs for static/config checks and adversarial unit tests.
+- [x] Add Linux Docker/XFS integration workflow with disposable loopback XFS filesystems.
+- [x] Make CI report integration tests as passed and report remaining skips with explicit reasons.
+- [x] Update security, architecture, storage, deployment, and roadmap documents for the broker/rootless-worker design.
+- [ ] Run and inspect the complete current-branch test/lint/build suite.
 
 ## Execution rules
 
@@ -85,13 +82,17 @@ Detailed implementation plan: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED
 
 ## Progress log
 
-### Investigation
+### Investigation and deployment hardening
 - [x] Inspected Compose deployment topology, API authentication/ownership, worker Docker/XFS privileges, workspace container settings, snapshot/storage implementation, egress proxy, lifecycle locking, and CI workflow.
-- [x] Created this remediation branch from `phase-2-isolated-workspaces`.
-- [x] Confirm the remediation branch was created from the Phase 2 branch ref; exact base SHA is recorded in PR #1.
-- [ ] Re-verify a green CI run after the lint correction before treating Phase 2.1 as verified.
-- [x] Phase 2.1 implementation edits committed: Compose, environment template, production settings validation, tests, CI trigger/Compose validation, and deployment documentation. Test results are pending; do not treat Phase 2.1 as complete until Actions is green.
+- [x] Completed deployment exposure and secret-hygiene remediation; CI runs 45860830556 and 45868184349 passed.
+- [x] Verified Docker/XFS broker migration in CI run 45864319247.
 
+### Rootless-worker branch
+- [x] Created `phase-2-rootless-worker-hardening` from the latest successful `phase-2-privileged-broker` commit `088364d3`.
+- [x] Added separate worker identity, broker-owned XFS mount-root permissions, worker-state volume, snapshot metadata migration, and broker-owned restore transitions.
+- [x] Added unit and Linux integration tests for rootless access and restore semantics.
+- [x] Updated implementation and security documentation.
+- [x] Verify all current-branch changes in GitHub Actions; quality and Linux XFS/Docker jobs both passed in run 45870278489.
 
 ## Privileged broker design constraints (research outcome)
 

@@ -129,6 +129,22 @@ class RemoteWorkspaceStorage:
             )
         )
 
+    def recover_restore(self, workspace_id: str) -> None:
+        self._workspace_path(workspace_id)
+        self._call(
+            lambda: self.broker_client.recover_storage_restore(
+                self.storage_kind, workspace_id
+            )
+        )
+
+    def commit_restore(self, workspace_id: str) -> None:
+        self._workspace_path(workspace_id)
+        self._call(
+            lambda: self.broker_client.commit_storage_restore(
+                self.storage_kind, workspace_id
+            )
+        )
+
     def delete_workspace(self, workspace_id: str) -> None:
         self._workspace_path(workspace_id)
         self._call(

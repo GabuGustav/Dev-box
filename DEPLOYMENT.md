@@ -15,6 +15,8 @@
 
 PostgreSQL is intentionally not published to the host. The API reaches it over the Compose service network. The API is published on host loopback only by default.
 
+The privileged broker initializes the persistent `worker_state` volume with owner UID/GID `10002:10001` and mode `0700` before the worker starts. The worker runs with that identity, no Linux capabilities, `no-new-privileges`, a read-only container root, bounded writable tmpfs mounts, and the separate worker-state volume. The broker alone mounts `broker_state` and owns XFS project registries. Do not manually change ownership or permissions on these named volumes. See [Phase 2.2.3 Rootless Worker](docs/PHASE_2_2_3_ROOTLESS_WORKER.md) for the storage permission contract and upgrade behavior.
+
 ## External deployment
 
 **Do not expose the API directly over plain HTTP.** Terminate TLS at a maintained reverse proxy or load balancer and configure the proxy to forward to the API over a trusted network. If the proxy runs on the deployment host, the default loopback binding allows it to reach `127.0.0.1:8000`.
@@ -36,7 +38,9 @@ The application rejects production configuration with a missing/placeholder exec
 - [ ] API traffic from clients is HTTPS-only.
 - [ ] API port is not publicly reachable except through the TLS proxy.
 - [ ] Worker and broker ports are not published to clients or the public network.
-- [ ] Docker socket is mounted only into the privileged broker, never into the worker or workspace containers.
+- [ ] Docker socket and `CAP_SYS_ADMIN` are held only by the privileged broker, never by the worker or workspace containers.
+- [ ] Worker runs as UID/GID `10002:10001`, has all capabilities dropped, and uses a read-only root filesystem.
+- [ ] `worker_state` and `broker_state` are backed up separately from the XFS data filesystems.
 - [ ] Broker token is distinct from the executor token and stored as a deployment secret.
 - [ ] `.env`, database credentials, executor token, and snapshot key are protected and backed up appropriately.
 - [ ] Firewall rules allow only required ingress and egress.

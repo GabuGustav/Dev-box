@@ -112,6 +112,8 @@ class SnapshotStore:
         max_snapshots: int = 10,
         max_snapshot_bytes: int = 10 * 1024 * 1024 * 1024,
         max_entries: int = 200_000,
+        registry_path: str | Path | None = None,
+        require_group_permissions: bool = False,
     ) -> None:
         key = None
         key_error = None
@@ -137,10 +139,60 @@ class SnapshotStore:
         self.max_snapshots = max_snapshots
         self.max_snapshot_bytes = max_snapshot_bytes
         self.max_entries = max_entries
-        self.registry = storage.root / ".devbox-snapshots.sqlite3"
+        self.legacy_registry = storage.root / ".devbox-snapshots.sqlite3"
+        self.registry = Path(registry_path) if registry_path else self.legacy_registry
+        self.require_group_permissions = require_group_permissions
+        if not self.registry.is_absolute():
+            raise SnapshotError("Snapshot metadata registry path must be absolute.")
+        self._migrate_legacy_registry()
+
+    def _migrate_legacy_registry(self) -> None:
+        if self.registry.is_symlink():
+            raise SnapshotError("Snapshot metadata registry path is unsafe.")
+        temporary = self.registry.with_name(self.registry.name + ".migrating")
+        if temporary.is_symlink() or (temporary.exists() and not temporary.is_file()):
+            raise SnapshotError("Snapshot metadata migration path is unsafe.")
+        if temporary.exists():
+            temporary.unlink()
+        for suffix in ("-journal", "-wal", "-shm"):
+            sidecar = temporary.with_name(temporary.name + suffix)
+            if sidecar.is_symlink() or (sidecar.exists() and not sidecar.is_file()):
+                raise SnapshotError("Snapshot metadata migration sidecar is unsafe.")
+            sidecar.unlink(missing_ok=True)
+        if self.registry == self.legacy_registry or self.registry.exists():
+            if self.registry.exists() and not self.registry.is_file():
+                raise SnapshotError("Snapshot metadata registry path is unsafe.")
+            return
+        legacy = self.legacy_registry
+        if not legacy.exists():
+            return
+        if legacy.is_symlink() or not legacy.is_file():
+            raise SnapshotError("Legacy snapshot metadata registry is unsafe.")
+        try:
+            self.registry.parent.mkdir(parents=True, exist_ok=True)
+            source = sqlite3.connect(legacy.resolve().as_uri() + "?mode=ro", uri=True)
+            try:
+                destination = sqlite3.connect(temporary)
+                try:
+                    source.backup(destination)
+                    destination.commit()
+                finally:
+                    destination.close()
+            finally:
+                source.close()
+            temporary.chmod(0o600)
+            os.replace(temporary, self.registry)
+            self._fsync_directory(self.registry.parent)
+        except (OSError, sqlite3.Error) as exc:
+            temporary.unlink(missing_ok=True)
+            raise SnapshotError("Unable to migrate the legacy snapshot metadata registry.") from exc
 
     def _connect(self) -> sqlite3.Connection:
+        if self.registry.is_symlink() or (self.registry.exists() and not self.registry.is_file()):
+            raise SnapshotError("Snapshot metadata registry path is unsafe.")
+        self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30)
+        self.registry.chmod(0o600)
         connection.execute(
             """CREATE TABLE IF NOT EXISTS snapshots (
                 snapshot_id TEXT PRIMARY KEY,
@@ -156,10 +208,16 @@ class SnapshotStore:
 
     def _workspace_directory(self, workspace_id: str) -> Path:
         directory = self.storage.ensure_workspace(workspace_id)
-        try:
-            directory.chmod(0o700)
-        except OSError as exc:
-            raise SnapshotError("Unable to secure the snapshot directory.") from exc
+        if self.require_group_permissions:
+            directory_stat = directory.stat(follow_symlinks=False)
+            if (
+                directory_stat.st_uid != 10001
+                or directory_stat.st_gid != 10001
+                or directory_stat.st_mode & 0o2070 != 0o2070
+            ):
+                raise SnapshotError(
+                    "Snapshot directory does not have broker-managed group permissions."
+                )
 
         if not self.registry.exists() and any(
             entry.name.endswith(".dbxsnap") or entry.name.endswith(".dbxsnap.tmp")
@@ -478,6 +536,13 @@ class SnapshotStore:
 
 
     def recover_restore(self, workspace_id: str) -> None:
+        broker_recovery = getattr(self.workspace_storage, "recover_restore", None)
+        if callable(broker_recovery):
+            try:
+                broker_recovery(workspace_id)
+            except Exception as exc:
+                raise SnapshotError("Unable to recover interrupted workspace restore.") from exc
+            return
         self.workspace_storage.validate_backend()
         _, workspace_directory = self.workspace_storage._workspace_path(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
@@ -530,36 +595,49 @@ class SnapshotStore:
                 workspace_id, stage, project_id, quota_multiplier=3
             )
             self._extract(encrypted_path, workspace_id, snapshot_id, stage)
-            if workspace_directory.exists():
-                os.replace(workspace_directory, backup)
-                self._fsync_directory(workspace_directory.parent)
-            try:
-                os.replace(stage, workspace_directory)
-                self._fsync_directory(workspace_directory.parent)
-                self.workspace_storage.mark_workspace_initialized(
-                    workspace_id, workspace_directory
-                )
-            except Exception:
-                if backup.exists() and not workspace_directory.exists():
-                    os.replace(backup, workspace_directory)
-                raise
-            if backup.exists():
-                shutil.rmtree(backup)
-                self._fsync_directory(workspace_directory.parent)
-            self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
+            broker_commit = getattr(self.workspace_storage, "commit_restore", None)
+            if callable(broker_commit):
+                broker_commit(workspace_id)
+            else:
+                if workspace_directory.exists():
+                    os.replace(workspace_directory, backup)
+                    self._fsync_directory(workspace_directory.parent)
+                try:
+                    os.replace(stage, workspace_directory)
+                    self._fsync_directory(workspace_directory.parent)
+                    self.workspace_storage.mark_workspace_initialized(
+                        workspace_id, workspace_directory
+                    )
+                except Exception:
+                    if backup.exists() and not workspace_directory.exists():
+                        os.replace(backup, workspace_directory)
+                    raise
+                if backup.exists():
+                    shutil.rmtree(backup)
+                    self._fsync_directory(workspace_directory.parent)
+                self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
             return {
                 "snapshot_id": snapshot_id,
                 "workspace_id": workspace_id,
                 "state": "restored",
             }
         except Exception as exc:
-            if stage.exists():
-                shutil.rmtree(stage, ignore_errors=True)
-            if backup.exists() and not workspace_directory.exists():
-                os.replace(backup, workspace_directory)
-                self._fsync_directory(workspace_directory.parent)
-            if not backup.exists():
-                self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
+            broker_recovery = getattr(self.workspace_storage, "recover_restore", None)
+            if callable(broker_recovery):
+                try:
+                    broker_recovery(workspace_id)
+                except Exception as recovery_error:
+                    raise SnapshotError(
+                        "Snapshot restore failed and broker recovery requires operator attention."
+                    ) from recovery_error
+            else:
+                if stage.exists():
+                    shutil.rmtree(stage, ignore_errors=True)
+                if backup.exists() and not workspace_directory.exists():
+                    os.replace(backup, workspace_directory)
+                    self._fsync_directory(workspace_directory.parent)
+                if not backup.exists():
+                    self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
             if isinstance(exc, SnapshotError):
                 raise
             raise SnapshotError(

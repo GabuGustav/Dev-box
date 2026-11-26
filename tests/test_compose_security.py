@@ -83,11 +83,11 @@ def test_worker_is_non_root_read_only_and_capability_free():
     compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
     worker = compose["services"]["worker"]
     dockerfile = Path("worker.Dockerfile").read_text(encoding="utf-8")
-    assert worker["user"] == "10001:10001"
+    assert worker["user"] == "10002:10001"
     assert worker["read_only"] is True
     assert worker["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in worker["security_opt"]
-    assert "USER 10001:10001" in dockerfile
+    assert "USER 10002:10001" in dockerfile
 
 
 def test_worker_has_no_default_or_external_network_route():
@@ -101,3 +101,22 @@ def test_worker_has_no_default_or_external_network_route():
     assert "broker_internal" not in api["networks"]
     assert compose["networks"]["worker_api"]["internal"] is True
     assert "egress-proxy" not in worker.get("depends_on", {})
+
+
+def test_worker_state_is_separate_from_broker_and_xfs_data():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    broker = compose["services"]["broker"]
+    assert "worker_state:/var/lib/devbox-worker" in worker["volumes"]
+    assert "worker_state:/var/lib/devbox-worker" in broker["volumes"]
+    assert "broker_state:/var/lib/devbox-broker" not in worker["volumes"]
+    assert worker["environment"]["DEVBOX_SNAPSHOT_REGISTRY_PATH"] == (
+        "/var/lib/devbox-worker/snapshots.sqlite3"
+    )
+    assert broker["environment"]["DEVBOX_WORKER_STATE_ROOT"] == "/var/lib/devbox-worker"
+
+
+def test_worker_tmpfs_is_writable_by_dedicated_uid_without_exec():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    assert any("uid=10002,gid=10001" in item and "noexec" in item for item in worker["tmpfs"])

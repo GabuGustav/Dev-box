@@ -114,3 +114,22 @@ def test_broker_client_validates_authenticated_readiness():
     client = make_client(handler)
     assert client.validate_connection() == {"status": "ready"}
     client.close()
+
+
+def test_broker_client_sends_restore_commit_and_recovery_requests():
+    calls = []
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        return httpx.Response(200, json={"workspace_id": workspace_id, "state": "restored"})
+
+    client = make_client(handler)
+    client.commit_storage_restore("workspace", workspace_id)
+    client.recover_storage_restore("workspace", workspace_id)
+
+    assert calls == [
+        ("POST", f"/internal/storage/workspace/{workspace_id}/commit-restore"),
+        ("POST", f"/internal/storage/workspace/{workspace_id}/recover-restore"),
+    ]
+    client.close()

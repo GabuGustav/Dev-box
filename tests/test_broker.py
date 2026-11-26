@@ -368,3 +368,76 @@ def test_broker_storage_api_maps_storage_failures_to_service_unavailable(
     with pytest.raises(HTTPException) as error:
         broker.api_validate_storage("workspace")
     assert error.value.status_code == 503
+
+
+class FakeRestoreStorage:
+    def __init__(self, root):
+        self.root = root
+        self.calls = []
+
+    def validate_backend(self):
+        return None
+
+    def _workspace_path(self, workspace_id):
+        digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
+        return digest, self.root / digest
+
+    def mark_workspace_initialized(self, workspace_id, directory):
+        self.calls.append(("mark", workspace_id, directory))
+
+    def set_project_quota(self, workspace_id, multiplier=1):
+        self.calls.append(("quota", workspace_id, multiplier))
+
+
+def test_broker_commit_restore_performs_and_registers_directory_swap(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "old.txt").write_text("old", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "new.txt").write_text("new", encoding="utf-8")
+
+    result = broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert result["state"] == "restored"
+    assert (workspace / "new.txt").read_text(encoding="utf-8") == "new"
+    assert not (workspace / "old.txt").exists()
+    assert not stage.exists()
+    assert not (tmp_path / f".{workspace.name}.restore-backup").exists()
+    assert ("mark", workspace_id, workspace) in storage.calls
+    assert ("quota", workspace_id, 1) in storage.calls
+
+
+def test_broker_recovery_restores_backup_and_discards_stage(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    backup = tmp_path / f".{workspace.name}.restore-backup"
+    backup.mkdir()
+    (backup / "previous.txt").write_text("safe", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+
+    result = broker.api_recover_storage_restore("workspace", workspace_id)
+
+    assert result["state"] == "recovered"
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "safe"
+    assert not backup.exists()
+    assert not stage.exists()
+    assert ("mark", workspace_id, workspace) in storage.calls
+    assert ("quota", workspace_id, 1) in storage.calls
+
+
+def test_broker_initializes_worker_state_with_restricted_permissions(tmp_path, monkeypatch):
+    state = tmp_path / "worker-state"
+    monkeypatch.setattr(broker, "WORKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker.os, "chown", lambda *_args: None, raising=False)
+
+    broker.prepare_worker_state()
+
+    assert state.is_dir()
+    assert state.stat().st_mode & 0o777 == 0o700

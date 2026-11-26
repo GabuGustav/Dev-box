@@ -47,6 +47,14 @@ class FakeStorageBroker:
         self._record(("mark", kind, workspace_id))
         return {"status": "initialized"}
 
+    def recover_storage_restore(self, kind, workspace_id):
+        self._record(("recover", kind, workspace_id))
+        return {"state": "recovered"}
+
+    def commit_storage_restore(self, kind, workspace_id):
+        self._record(("commit", kind, workspace_id))
+        return {"state": "restored"}
+
     def delete_storage_workspace(self, kind, workspace_id):
         self._record(("delete", kind, workspace_id))
         digest = hashlib.sha256(workspace_id.encode()).hexdigest()[:32]
@@ -155,3 +163,26 @@ def test_remote_storage_fails_closed_when_broker_is_unavailable(tmp_path):
 
     with pytest.raises(WorkspaceStorageError, match="broker storage operation failed"):
         storage.validate_backend()
+
+
+def test_remote_storage_delegates_restore_transitions_to_broker(tmp_path):
+    storage, broker, _ = make_storage(tmp_path)
+
+    storage.commit_restore(WORKSPACE_ID)
+    storage.recover_restore(WORKSPACE_ID)
+
+    assert broker.calls == [
+        ("commit", "workspace", WORKSPACE_ID),
+        ("recover", "workspace", WORKSPACE_ID),
+    ]
+
+
+def test_remote_storage_rejects_invalid_workspace_before_restore_rpc(tmp_path):
+    storage, broker, _ = make_storage(tmp_path)
+
+    with pytest.raises(WorkspaceStorageError, match="Invalid workspace ID"):
+        storage.commit_restore("../invalid")
+    with pytest.raises(WorkspaceStorageError, match="Invalid workspace ID"):
+        storage.recover_restore("../invalid")
+
+    assert broker.calls == []
