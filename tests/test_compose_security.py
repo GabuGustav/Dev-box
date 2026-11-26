@@ -26,3 +26,17 @@ def test_api_has_dedicated_internal_reverse_proxy_network():
     assert "api_proxy" in compose["services"]["api"]["networks"]
     assert compose["networks"]["api_proxy"]["internal"] is True
     assert compose["networks"]["api_proxy"]["name"] == "devbox_api_proxy"
+
+def test_privileged_broker_is_internal_only():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    broker = compose["services"]["broker"]
+    assert "ports" not in broker
+    assert broker["networks"] == ["broker_internal"]
+    assert compose["networks"]["broker_internal"]["internal"] is True
+
+
+def test_worker_and_broker_share_only_the_private_broker_network_for_rpc():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    assert "broker_internal" in compose["services"]["worker"]["networks"]
+    assert "broker_internal" in compose["services"]["broker"]["networks"]
+    assert "broker_internal" not in compose["services"]["api"]["networks"]
