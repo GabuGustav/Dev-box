@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening", "phase-2-privileged-broker", "phase-2-xfs-quota-broker"]
   pull_request:
-    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening", "phase-2-xfs-quota-broker"]
+    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening", "phase-2-privileged-broker", "phase-2-xfs-quota-broker"]
 
 jobs:
   quality:
