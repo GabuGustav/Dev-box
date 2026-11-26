@@ -435,7 +435,7 @@ def test_broker_recovery_restores_backup_and_discards_stage(tmp_path, monkeypatc
 def test_broker_initializes_worker_state_with_restricted_permissions(tmp_path, monkeypatch):
     state = tmp_path / "worker-state"
     monkeypatch.setattr(broker, "WORKER_STATE_ROOT", state)
-    monkeypatch.setattr(broker.os, "chown", lambda *_args: None)
+    monkeypatch.setattr(broker.os, "chown", lambda *_args: None, raising=False)
 
     broker.prepare_worker_state()
 
