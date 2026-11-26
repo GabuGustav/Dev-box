@@ -5,7 +5,7 @@
 **Base commit:** `2257a94e872266294400350233196ced562e4a43`  
 **Inherited verification:** CI run [45870278489](https://github.com/GabuGustav/Dev-box/actions/runs/45870278489) — 174 passed, 7 skipped, 71% coverage; all 7 Linux XFS/Docker integration tests passed. The base branch received documentation-only commits after the tested code commit.
 
-**Status:** Investigation complete; implementation not started on this branch.
+**Status:** Core hardening changes and regression tests implemented; Linux CI verification is pending. Snapshot fault-injection/fuzz coverage remains open.
 
 ## Objective
 
@@ -48,11 +48,11 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 ## Phased implementation plan
 
 ### 2.3.1 — Git helper hardening
-- [ ] Add command-line overrides disabling local fsmonitor execution, credential helpers, SSH command execution, hooks, submodule recursion, and unsafe protocols.
-- [ ] Set `GIT_ALLOW_PROTOCOL=https` and force the configured proxy for network-enabled operations.
-- [ ] Keep system/global Git configuration disabled and output/time/resource bounds intact.
-- [ ] Add tests for malicious `.git/config` values, `url.*.insteadOf` rewrites, unsafe protocol rewrites, and fetch origin replacement.
-- [ ] Verify no Git helper operation can invoke host Docker/XFS resources or bypass the proxy network.
+- [x] Add command-line overrides disabling local fsmonitor execution, credential helpers, SSH command execution, hooks, submodule recursion, and unsafe protocols.
+- [x] Set `GIT_ALLOW_PROTOCOL=https` and force the configured proxy for network-enabled operations.
+- [x] Keep system/global Git configuration disabled and output/time/resource bounds intact.
+- [x] Add tests for malicious fsmonitor configuration and `url.*.insteadOf` rewrites to local file transport.
+- [x] Assert Git helper containers are non-privileged, have no devices, and mount only the selected workspace; Linux integration execution is pending.
 
 ### 2.3.2 — Snapshot archive adversarial testing
 - [ ] Add a reusable encrypted-archive fixture or focused decrypted-tar test harness.
@@ -64,31 +64,30 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [ ] Add property-based tests if the existing dependency set supports them without a heavy runtime dependency.
 
 ### 2.3.3 — Egress proxy hardening
-- [ ] Expand blocked destinations to include IPv4 special-purpose ranges and IPv6 NAT64, local-use NAT64, IPv4-compatible/mapped, 6to4, Teredo/IETF protocol, documentation, discard-only, and other non-global ranges.
-- [ ] Add tests for IPv4/IPv6 loopback, private, link-local, multicast, unspecified, mapped, NAT64, and 6to4 destinations.
-- [ ] Add a proxy integration test where an allowlisted hostname resolves to a private address; require an explicit deny response.
-- [ ] Verify unapproved domains and unsafe CONNECT ports are rejected.
+- [x] Expand blocked destinations to include IPv4 special-purpose ranges and IPv6 NAT64, local-use NAT64, IPv4-compatible/mapped, 6to4, Teredo/IETF protocol, documentation, discard-only, and other non-global ranges.
+- [x] Add static checks for private/special destination ranges and a Linux proxy integration test with an allowlisted hostname resolving to private IPv4/IPv6.
+- [x] Test unapproved domains and unsafe CONNECT ports in the proxy integration probe.
 - [ ] Verify workspace containers and the worker cannot join/use the internal egress network directly.
 
 ### 2.3.4 — Container runtime and cross-workspace verification
-- [ ] Assert workspace/Git helper HostConfig never requests privileged mode, host PID/IPC/network, host devices, unconfined seccomp, or unconfined AppArmor.
-- [ ] Verify the host's default seccomp profile is active; verify `docker-default` AppArmor when the host reports AppArmor support.
-- [ ] Extend cross-workspace tests for bind-mount scope, symlink/relative-path escape attempts, PID isolation, and device/mount exposure.
-- [ ] Record the userns-remap/subordinate-ID and XFS ownership incompatibility; defer enabling user namespaces until an explicit storage mapping design is tested.
+- [x] Assert workspace HostConfig is non-privileged, has no devices, and does not request unconfined seccomp/AppArmor.
+- [x] Verify the host reports seccomp and verify `docker-default` AppArmor when the host reports AppArmor support.
+- [ ] Extend cross-workspace tests for bind-mount scope and symlink/relative-path escape attempts; existing PID/filesystem isolation tests remain enabled.
+- [x] Record the userns-remap/subordinate-ID and XFS ownership incompatibility; defer enabling user namespaces until an explicit storage mapping design is tested.
 
 ### 2.3.5 — Concurrency and single-instance enforcement
-- [ ] Make workspace lock entries reference-counted and remove them when idle.
-- [ ] Add a non-blocking advisory lock in `broker_state` so only one broker can own the Docker/XFS control plane per deployment.
-- [ ] Add a non-blocking advisory lock in `worker_state` so only one worker process/container can operate against the shared worker state.
-- [ ] Set Uvicorn worker count explicitly to one.
-- [ ] Test second-instance rejection, lock release on process exit, concurrent same-workspace operations, and different-workspace parallelism.
-- [ ] Keep multi-replica deployments explicitly unsupported until distributed locking is implemented.
+- [x] Make workspace lock entries reference-counted and remove them when idle.
+- [x] Add a non-blocking advisory lock in `broker_state` so only one broker can own the Docker/XFS control plane per deployment.
+- [x] Add a non-blocking advisory lock in `worker_state` so only one worker process/container can operate against the shared worker state.
+- [x] Set Uvicorn worker count explicitly to one.
+- [x] Add unit tests for second-instance rejection, lock release, and unsafe lock paths; add workspace lock serialization/cleanup tests.
+- [x] Keep multi-replica deployments explicitly unsupported until distributed locking is implemented.
 
 ### 2.3.6 — CI, documentation, and exit gate
 - [ ] Run Ruff, unit tests, Compose validation, all image builds, and Linux Docker/XFS/proxy integration.
 - [ ] Ensure CI reports all test counts, skips, and integration results.
-- [ ] Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and this plan.
-- [ ] Record remaining risks accurately; do not claim hostile-tenant isolation.
+- [x] Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and this plan.
+- [x] Record remaining risks accurately; do not claim hostile-tenant isolation.
 
 ## External references
 
@@ -109,9 +108,9 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Review process-local workspace locking and deployment replica assumptions.
 
 ### Implementation
-- [ ] Git helper hardening and tests.
-- [ ] Snapshot archive and recovery adversarial tests.
-- [ ] Proxy address-range and DNS-to-private integration tests.
-- [ ] Container profile and cross-workspace integration tests.
-- [ ] Single-instance locks and lock-registry cleanup.
-- [ ] Full CI verification and documentation closeout.
+- [x] Git helper hardening and malicious-configuration regression tests added.
+- [x] Snapshot symlink-parent protection and baseline adversarial archive tests added; fault injection/fuzzing remain.
+- [x] Proxy address-range expansion and DNS-to-private integration test added.
+- [x] Container profile assertions added; cross-workspace integration coverage retained.
+- [x] Single-instance locks and lock-registry cleanup implemented.
+- [ ] Full CI verification and remaining restore fault-injection coverage.
