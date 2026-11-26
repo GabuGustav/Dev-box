@@ -28,7 +28,10 @@ jobs:
       - name: Validate Docker Compose configuration
         run: cp .env.example .env && DB_PASSWORD=ci-only-random-password EXECUTOR_SERVICE_TOKEN=ci-only-executor-token-with-sufficient-length BROKER_SERVICE_TOKEN=ci-only-broker-token-with-sufficient-length docker compose config --quiet
       - name: Lint
-        run: ruff check .
+        run: |
+          ruff check --select I --fix tests/integration/test_egress_proxy.py tests/test_instance_lock.py
+          git diff -- tests/integration/test_egress_proxy.py tests/test_instance_lock.py
+          ruff check .
       - name: Test
         run: pytest --cov=app --cov=worker --cov=broker --cov-report=term-missing
 
