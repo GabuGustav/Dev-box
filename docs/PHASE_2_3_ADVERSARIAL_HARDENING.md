@@ -55,12 +55,13 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Assert Git helper containers are non-privileged, have no devices, and mount only the selected workspace; Linux integration execution is pending.
 
 ### 2.3.2 — Snapshot archive adversarial testing
-- [ ] Add a reusable encrypted-archive fixture or focused decrypted-tar test harness.
-- [ ] Test normalized duplicate paths, file/directory collisions, symlink chains, symlink-parent paths (including a parent link that redirects a later link outside the stage), absolute paths, traversal, hard links, devices, FIFOs, and unsupported entry types.
-- [ ] Reject symlink entries whose ancestor path is another symlink entry before creating any symlinks.
-- [ ] Test oversized members, excessive entry counts, malformed/truncated tar headers, invalid PAX metadata, and authenticated-ciphertext tampering.
-- [ ] Add fault injection at each restore transition: stage creation, extraction, old-tree backup, stage swap, registry identity refresh, quota reset, and cleanup.
-- [ ] Prove recovery is idempotent and preserves either the previous complete tree or the restored complete tree; never expose a partial workspace.
+- [x] Add a reusable decrypted-tar fixture (VerifiedArchiveReader and prepare_restore_with_archive) for adversarial extraction tests.
+- [x] Test normalized duplicate paths, file/directory collisions, symlink-parent paths, absolute paths, traversal, hard links, devices, and FIFOs.
+- [x] Reject symlink entries whose ancestor path is another symlink before creating any symlinks.
+- [x] Test expanded-size and entry-count limits, truncated member data, PAX path-override traversal, and authenticated-ciphertext tampering.
+- [ ] Add malformed tar-header and malformed PAX-record tests; distinguish malformed metadata from valid PAX metadata that specifies an unsafe path.
+- [ ] Complete restore fault injection for stage creation and old-tree backup rename. Existing tests cover extraction rejection/cleanup, stage swap rollback, registry identity refresh failure, quota reset failure, backup cleanup retry, and recovery idempotency.
+- [x] Prove recovery is idempotent and preserves either the previous complete tree or the restored complete tree; never expose a partial workspace (unit tests and Linux XFS/Docker integration passed).
 - [ ] Add property-based tests if the existing dependency set supports them without a heavy runtime dependency.
 
 ### 2.3.3 — Egress proxy hardening
@@ -85,7 +86,7 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 
 ### 2.3.6 — CI, documentation, and exit gate
 - [x] Run Ruff, unit tests, Compose validation, all image builds, and Linux Docker/XFS/proxy integration (run 45907271567 passed: Ruff clean, four images built, Compose valid, 201 unit tests passed, 8 opt-in tests skipped in the quality job, and the dedicated Linux XFS/Docker integration job passed).
-- [ ] Ensure CI reports all test counts, skips, and integration results.
+- [x] Ensure CI reports all test counts, skips, and integration results.
 - [x] Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and this plan.
 - [x] Record remaining risks accurately; do not claim hostile-tenant isolation.
 
