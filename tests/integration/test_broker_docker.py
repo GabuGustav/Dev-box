@@ -31,6 +31,7 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
         "128m",
         inode_limit=5000,
         registry_path=state_root / "workspace-projects.sqlite3",
+        shared_group_id=10001,
     )
     monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
     image_context = Path(__file__).resolve().parents[2] / "workspace-image"
