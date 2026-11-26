@@ -215,9 +215,7 @@ def test_start_delegates_workspace_creation_to_broker(monkeypatch, tmp_path):
 
 
 def test_start_fails_closed_on_unexpected_broker_mount(monkeypatch, tmp_path):
-    workspace_id, storage_path, storage, snapshots, broker = configure_worker(
-        monkeypatch, tmp_path
-    )
+    workspace_id, _, _, _, broker = configure_worker(monkeypatch, tmp_path)
     unsafe = FakeBrokerContainer(
         executor.names_for(workspace_id)[0],
         workspace_id,
