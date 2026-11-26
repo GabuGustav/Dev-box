@@ -21,7 +21,8 @@ from worker.broker_client import (
     BrokerUnavailable,
 )
 from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
-from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
+from worker.remote_storage import RemoteWorkspaceStorage
+from worker.storage import WorkspaceStorageError
 
 logger = logging.getLogger("devbox.executor")
 WORKSPACE_ID_PATTERN = re.compile(r"^dbx_[A-Za-z0-9_-]{20,40}$")
@@ -37,13 +38,21 @@ SNAPSHOT_ENCRYPTION_KEY = os.getenv("DEVBOX_SNAPSHOT_ENCRYPTION_KEY", "")
 SNAPSHOT_MAX_COUNT = int(os.getenv("DEVBOX_SNAPSHOT_MAX_COUNT", "10"))
 SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3)))
 RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))
-workspace_storage = XFSWorkspaceStorage(
-    WORKSPACE_STORAGE_ROOT, WORKSPACE_DISK_QUOTA, WORKSPACE_INODE_LIMIT
-)
-snapshot_storage = XFSWorkspaceStorage(
-    SNAPSHOT_STORAGE_ROOT, SNAPSHOT_DISK_QUOTA, SNAPSHOT_INODE_LIMIT
-)
 broker_client = BrokerClient()
+workspace_storage = RemoteWorkspaceStorage(
+    WORKSPACE_STORAGE_ROOT,
+    WORKSPACE_QUOTA,
+    WORKSPACE_INODE_LIMIT,
+    "workspace",
+    broker_client,
+)
+snapshot_storage = RemoteWorkspaceStorage(
+    SNAPSHOT_STORAGE_ROOT,
+    SNAPSHOT_QUOTA,
+    SNAPSHOT_INODE_LIMIT,
+    "snapshot",
+    broker_client,
+)
 snapshot_store = SnapshotStore(
     snapshot_storage,
     workspace_storage,
