@@ -685,6 +685,8 @@ async def reconciliation_loop() -> None:
 
 def prepare_broker_state() -> None:
     root = BROKER_STATE_ROOT
+    if BROKER_LOCK_PATH.parent != root:
+        raise RuntimeError("Broker lock must be stored in the broker-state volume.")
     if root.is_symlink():
         raise RuntimeError("Broker state directory must not be a symlink.")
     root.mkdir(parents=True, exist_ok=True)
