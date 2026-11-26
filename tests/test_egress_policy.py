@@ -52,3 +52,17 @@ def test_egress_proxy_blocks_private_and_unapproved_destinations():
     access_rules = [line for line in lines if line.startswith("http_access ")]
     assert access_rules[-1] == "http_access deny all"
     assert "http_access allow all" not in lines
+
+
+def test_only_the_proxy_and_git_helpers_join_the_egress_network():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    broker_section = compose.split("  broker:", 1)[1].split("\n  ", 1)[0]
+    worker_section = compose.split("  worker:", 1)[1].split("\n  ", 1)[0]
+    proxy_section = compose.split("  egress-proxy:", 1)[1].split("\n  ", 1)[0]
+
+    assert "egress_internal" not in broker_section
+    assert "egress_internal" not in worker_section
+    assert "egress_internal" in proxy_section
+
+    broker_source = (ROOT / "broker" / "main.py").read_text(encoding="utf-8")
+    assert 'network_mode="none"' in broker_source
