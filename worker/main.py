@@ -302,6 +302,7 @@ async def lifespan(_: FastAPI):
     finally:
         reconciler.cancel()
         await asyncio.gather(reconciler, return_exceptions=True)
+        broker_client.close()
 
 
 app = FastAPI(title="DevBox Executor", version="0.1.0", lifespan=lifespan)
