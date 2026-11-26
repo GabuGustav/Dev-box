@@ -9,7 +9,7 @@
    python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
 
-   Use separate generated values for `DB_PASSWORD` and `EXECUTOR_SERVICE_TOKEN`. Keep `.env` out of version control.
+   Use separate generated values for `DB_PASSWORD`, `EXECUTOR_SERVICE_TOKEN`, and `BROKER_SERVICE_TOKEN`. Keep `.env` out of version control.
 3. Keep `API_BIND_ADDRESS=127.0.0.1` for local-only access.
 4. Start with `docker compose up --build`.
 
@@ -35,7 +35,8 @@ The application rejects production configuration with a missing/placeholder exec
 - [ ] PostgreSQL has no published host port and is reachable only by authorized internal services.
 - [ ] API traffic from clients is HTTPS-only.
 - [ ] API port is not publicly reachable except through the TLS proxy.
-- [ ] Worker port and Docker socket are not exposed to clients or the public network.
+- [ ] Worker and broker ports are not published to clients or the public network.
+- [ ] Docker socket is mounted only into the privileged broker, never into the worker or workspace containers.
 - [ ] Broker token is distinct from the executor token and stored as a deployment secret.
 - [ ] `.env`, database credentials, executor token, and snapshot key are protected and backed up appropriately.
 - [ ] Firewall rules allow only required ingress and egress.
