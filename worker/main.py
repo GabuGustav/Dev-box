@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
+from worker.instance_lock import acquire_file_lock
 from worker.broker_client import (
     BrokerClient,
     BrokerError,
@@ -37,6 +38,16 @@ SNAPSHOT_INODE_LIMIT = int(os.getenv("DEVBOX_SNAPSHOT_INODE_LIMIT", "50000"))
 SNAPSHOT_ENCRYPTION_KEY = os.getenv("DEVBOX_SNAPSHOT_ENCRYPTION_KEY", "")
 SNAPSHOT_MAX_COUNT = int(os.getenv("DEVBOX_SNAPSHOT_MAX_COUNT", "10"))
 SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3)))
+SNAPSHOT_REGISTRY_PATH = Path(
+    os.getenv("DEVBOX_SNAPSHOT_REGISTRY_PATH", "/var/lib/devbox-worker/snapshots.sqlite3")
+)
+WORKER_LOCK_PATH = Path(
+    os.getenv("DEVBOX_WORKER_LOCK_PATH", str(SNAPSHOT_REGISTRY_PATH.with_name("worker.lock")))
+)
+WORKER_LOCK_ENABLED = os.getenv("DEVBOX_WORKER_LOCK_ENABLED", "0") == "1"
+WORKER_LOCK_HANDLE = (
+    acquire_file_lock(WORKER_LOCK_PATH, "worker") if WORKER_LOCK_ENABLED else None
+)
 RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))
 broker_client = BrokerClient()
 workspace_storage = RemoteWorkspaceStorage(
@@ -59,9 +70,7 @@ snapshot_store = SnapshotStore(
     SNAPSHOT_ENCRYPTION_KEY,
     max_snapshots=SNAPSHOT_MAX_COUNT,
     max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
-    registry_path=os.getenv(
-        "DEVBOX_SNAPSHOT_REGISTRY_PATH", "/var/lib/devbox-worker/snapshots.sqlite3"
-    ),
+    registry_path=SNAPSHOT_REGISTRY_PATH,
     require_group_permissions=True,
 )
 
@@ -298,24 +307,30 @@ async def reconciliation_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if not SERVICE_TOKEN:
-        logger.warning(
-            "DEVBOX_EXECUTOR_TOKEN is not configured; internal calls will be rejected."
-        )
-    broker_client.validate_config()
+    if WORKER_LOCK_ENABLED and WORKER_LOCK_HANDLE is None:
+        raise RuntimeError("The worker single-instance lock is unavailable.")
+    reconciler = None
     try:
-        broker_client.validate_connection()
-    except BrokerError as exc:
-        raise RuntimeError(
-            "Privileged broker authentication/readiness check failed."
-        ) from exc
-    reconciler = asyncio.create_task(reconciliation_loop())
-    try:
+        if not SERVICE_TOKEN:
+            logger.warning(
+                "DEVBOX_EXECUTOR_TOKEN is not configured; internal calls will be rejected."
+            )
+        broker_client.validate_config()
+        try:
+            broker_client.validate_connection()
+        except BrokerError as exc:
+            raise RuntimeError(
+                "Privileged broker authentication/readiness check failed."
+            ) from exc
+        reconciler = asyncio.create_task(reconciliation_loop())
         yield
     finally:
-        reconciler.cancel()
-        await asyncio.gather(reconciler, return_exceptions=True)
+        if reconciler is not None:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
         broker_client.close()
+        if WORKER_LOCK_HANDLE is not None:
+            WORKER_LOCK_HANDLE.close()
 
 
 app = FastAPI(title="DevBox Executor", version="0.1.0", lifespan=lifespan)
