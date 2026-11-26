@@ -62,6 +62,7 @@ snapshot_store = SnapshotStore(
     registry_path=os.getenv(
         "DEVBOX_SNAPSHOT_REGISTRY_PATH", "/var/lib/devbox-worker/snapshots.sqlite3"
     ),
+    require_group_permissions=True,
 )
 
 
