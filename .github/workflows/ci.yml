@@ -61,6 +61,7 @@ jobs:
           sudo -E env \
             DEVBOX_TEST_XFS_ROOT=/mnt/devbox-workspace-xfs \
             DEVBOX_TEST_SNAPSHOT_XFS_ROOT=/mnt/devbox-snapshot-xfs \
+            DEVBOX_TEST_BROKER_STATE_ROOT=/tmp/devbox-broker-state \
             DEVBOX_TEST_SNAPSHOT_ENCRYPTION_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
             DEVBOX_RUN_DOCKER_INTEGRATION=1 \
             "$(which python)" -m pytest -v tests/integration
@@ -69,4 +70,5 @@ jobs:
         run: |
           sudo umount /mnt/devbox-snapshot-xfs || true
           sudo umount /mnt/devbox-workspace-xfs || true
+          sudo rm -rf /tmp/devbox-broker-state
           sudo rm -f /tmp/devbox-workspace-xfs.img /tmp/devbox-snapshot-xfs.img
