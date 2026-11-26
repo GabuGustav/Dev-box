@@ -544,7 +544,10 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
                 "workspace_id": workspace_id,
             },
         )
-        raise HTTPException(status_code=503, detail="Git execution service is unavailable.") from exc
+        raise HTTPException(
+            status_code=503,
+            detail="Git execution service is unavailable.",
+        ) from exc
     finally:
         if container is not None:
             try:
