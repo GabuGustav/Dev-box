@@ -24,6 +24,7 @@ If the proxy is containerized, attach it to the existing `devbox_api_proxy` inte
 Set `ENVIRONMENT=production` and provide:
 - A unique `DB_PASSWORD` of at least 24 URL-safe characters; the Compose interpolation forms the internal PostgreSQL URL.
 - A unique `EXECUTOR_SERVICE_TOKEN` of at least 32 characters.
+- A separate unique `BROKER_SERVICE_TOKEN` of at least 32 characters. Never reuse the executor token.
 - A PostgreSQL `DATABASE_URL` when running the API outside the supplied Compose environment.
 - A securely generated `SNAPSHOT_ENCRYPTION_KEY` and protected backup of that key.
 
@@ -35,6 +36,7 @@ The application rejects production configuration with a missing/placeholder exec
 - [ ] API traffic from clients is HTTPS-only.
 - [ ] API port is not publicly reachable except through the TLS proxy.
 - [ ] Worker port and Docker socket are not exposed to clients or the public network.
+- [ ] Broker token is distinct from the executor token and stored as a deployment secret.
 - [ ] `.env`, database credentials, executor token, and snapshot key are protected and backed up appropriately.
 - [ ] Firewall rules allow only required ingress and egress.
 - [ ] Logs and reverse-proxy configuration do not record authorization headers or secrets.
