@@ -507,3 +507,96 @@ def test_snapshot_restore_rejects_file_as_parent_path(tmp_path, monkeypatch):
 
     assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
     assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def prepare_restore_with_archive(tmp_path, monkeypatch, payload, *, max_bytes=None, max_entries=None):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    if max_bytes is not None:
+        store.max_snapshot_bytes = max_bytes
+    if max_entries is not None:
+        store.max_entries = max_entries
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+    return store, workspace, snapshot
+
+
+def test_snapshot_restore_rejects_oversized_expanded_member(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("large.txt")
+        member.size = 5
+        archive.addfile(member, io.BytesIO(b"12345"))
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, archive_bytes.getvalue(), max_bytes=4
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_excessive_entry_count(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        for name in ("one.txt", "two.txt"):
+            member = tarfile.TarInfo(name)
+            member.size = 1
+            archive.addfile(member, io.BytesIO(b"x"))
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, archive_bytes.getvalue(), max_entries=1
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_truncated_member_data(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("truncated.txt")
+        member.size = 10
+        archive.addfile(member, io.BytesIO(b"0123456789"))
+    payload = archive_bytes.getvalue()[:520]
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, payload
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_pax_path_override_traversal(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        member = tarfile.TarInfo("safe.txt")
+        member.pax_headers = {"path": "../escape.txt"}
+        member.size = 1
+        archive.addfile(member, io.BytesIO(b"x"))
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, archive_bytes.getvalue()
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not (workspace.parent / "escape.txt").exists()
+    assert not list(workspace.parent.glob(".*.restore-stage"))
