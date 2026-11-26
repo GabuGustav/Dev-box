@@ -1,4 +1,5 @@
 import hashlib
+import io
 import secrets
 import sqlite3
 import tarfile
@@ -371,3 +372,45 @@ def test_snapshot_entry_limit_is_enforced(tmp_path):
         store.create(WORKSPACE_ID, workspace)
 
     assert store.list(WORKSPACE_ID) == []
+
+
+class VerifiedArchiveReader(io.BytesIO):
+    def verify(self):
+        return None
+
+
+def test_snapshot_restore_rejects_symlink_parent_chain(tmp_path, monkeypatch):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        regular = tarfile.TarInfo("partial.txt")
+        regular.size = len(b"partial")
+        archive.addfile(regular, io.BytesIO(b"partial"))
+        parent_link = tarfile.TarInfo("dir/sub")
+        parent_link.type = tarfile.SYMTYPE
+        parent_link.linkname = ".."
+        archive.addfile(parent_link)
+        child_link = tarfile.TarInfo("dir/sub/link")
+        child_link.type = tarfile.SYMTYPE
+        child_link.linkname = "../../outside"
+        archive.addfile(child_link)
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError, match="nested beneath another symlink"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not (workspace / "partial.txt").exists()
+    assert not (workspace / "link").is_symlink()
+    assert not list(workspace.parent.glob(".*.restore-stage"))
