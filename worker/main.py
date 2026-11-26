@@ -213,7 +213,13 @@ def names_for(workspace_id: str) -> tuple[str, str]:
     return f"devbox-ws-{digest}", f"xfs-{digest}"
 
 
-_workspace_locks: dict[str, threading.RLock] = {}
+class _WorkspaceLockEntry:
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.users = 0
+
+
+_workspace_locks: dict[str, _WorkspaceLockEntry] = {}
 _workspace_locks_guard = threading.Lock()
 
 
@@ -221,9 +227,19 @@ _workspace_locks_guard = threading.Lock()
 def workspace_lock(workspace_id: str):
     names_for(workspace_id)
     with _workspace_locks_guard:
-        lock = _workspace_locks.setdefault(workspace_id, threading.RLock())
-    with lock:
-        yield
+        entry = _workspace_locks.get(workspace_id)
+        if entry is None:
+            entry = _WorkspaceLockEntry()
+            _workspace_locks[workspace_id] = entry
+        entry.users += 1
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _workspace_locks_guard:
+            entry.users -= 1
+            if entry.users == 0 and _workspace_locks.get(workspace_id) is entry:
+                del _workspace_locks[workspace_id]
 
 
 def serialize_workspace_operation(function):
