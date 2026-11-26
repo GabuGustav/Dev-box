@@ -60,3 +60,21 @@ def test_worker_image_does_not_install_docker_sdk():
     dockerfile = Path("worker.Dockerfile").read_text(encoding="utf-8")
     assert "docker>=" not in dockerfile.lower()
     assert "httpx>=" in dockerfile.lower()
+
+def test_xfs_admin_capability_and_registry_volume_are_broker_only():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    broker = compose["services"]["broker"]
+    assert "SYS_ADMIN" not in worker.get("cap_add", [])
+    assert "SYS_ADMIN" in broker["cap_add"]
+    assert any("broker_state:/var/lib/devbox-broker" in mount for mount in broker["volumes"])
+    assert not any("broker_state" in mount for mount in worker["volumes"])
+
+
+def test_xfs_tools_are_installed_only_in_broker_image():
+    worker_dockerfile = Path("worker.Dockerfile").read_text(encoding="utf-8").lower()
+    broker_dockerfile = Path("broker.Dockerfile").read_text(encoding="utf-8").lower()
+    assert "xfsprogs" not in worker_dockerfile
+    assert "util-linux" not in worker_dockerfile
+    assert "xfsprogs" in broker_dockerfile
+    assert "util-linux" in broker_dockerfile
