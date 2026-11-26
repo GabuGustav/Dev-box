@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 from pathlib import Path
 from uuid import uuid4
@@ -82,7 +81,12 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
         assert "No commits yet" in output or "On branch" in output
         assert client.containers.list(
             all=True,
-            filters={"label": f"devbox.git_helper=true,devbox.workspace_id={workspace_id}"},
+            filters={
+                "label": [
+                    "devbox.git_helper=true",
+                    f"devbox.workspace_id={workspace_id}",
+                ]
+            },
         ) == []
 
         stopped = broker.stop_workspace(workspace_id)
