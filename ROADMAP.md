@@ -47,14 +47,15 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 ### Phase 2 security-hardening overlay
 
-The implementation checklist and exit gates are tracked in [Phase 2 Security Hardening](docs/PHASE_2_SECURITY_HARDENING.md). Phase 2 is **not security-release complete** until the deployment exposure, privileged-worker boundary, runtime isolation, storage recovery, network egress, concurrency, and CI verification gates in that plan are closed. Source-level controls and mocked tests do not substitute for Linux XFS/Docker integration and adversarial testing.
+The implementation checklist and exit gates are tracked in [Phase 2 Security Hardening](docs/PHASE_2_SECURITY_HARDENING.md), [Phase 2.2 Privileged Broker](docs/PHASE_2_2_PRIVILEGED_BROKER.md), and [Rootless Worker](docs/PHASE_2_2_3_ROOTLESS_WORKER.md). Phase 2 is **not security-release complete** until the deployment exposure, privileged-worker boundary, runtime isolation, storage recovery, network egress, concurrency, and CI verification gates in that plan are closed. Source-level controls and mocked tests do not substitute for Linux XFS/Docker integration and adversarial testing.
 
 - [x] Complete source-level security investigation and record confirmed risks versus unverified hypotheses.
-- [x] Create isolated remediation branch from `phase-2-isolated-workspaces`.
 - [x] Complete deployment exposure and secret-hygiene fixes (CI run 45860830556 passed).
-- [ ] Finish reducing worker privilege with the host broker. Docker socket and Docker SDK have moved out of the worker; XFS quota administration and `CAP_SYS_ADMIN` removal remain.
-- [ ] Complete adversarial snapshot/archive and egress testing (XFS/Docker workspace integration baseline passed; adversarial archive and proxy bypass tests remain).
-- [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed; extended recovery/fuzz drills remain).
+- [x] Move Docker lifecycle, Git helper execution, and XFS quota administration behind the private broker; worker has no Docker socket or `CAP_SYS_ADMIN` (CI run 45864319247 passed).
+- [x] Verify the Compose schema correction on the latest base (CI run 45868184349 passed).
+- [ ] Verify the dedicated UID/GID `10002:10001`, non-writable XFS mount roots, worker-state migration, and broker-owned restore swaps on `phase-2-rootless-worker-hardening`.
+- [ ] Complete adversarial snapshot/archive, egress bypass, cross-workspace, and concurrency testing.
+- [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed in run 45864319247; extended recovery/fuzz drills remain).
 
 ## Phase 3 — Git and repository discovery
 
