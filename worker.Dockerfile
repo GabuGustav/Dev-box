@@ -7,4 +7,4 @@ COPY worker ./worker
 RUN groupadd --gid 10001 devbox && useradd --uid 10002 --gid 10001 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin devbox
 USER 10002:10001
 EXPOSE 9000
-CMD ["uvicorn", "worker.main:app", "--host", "0.0.0.0", "--port", "9000"]
+CMD ["uvicorn", "worker.main:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "1"]
