@@ -2,6 +2,7 @@ import errno
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from uuid import uuid4
 
@@ -26,6 +27,21 @@ def new_workspace_id() -> str:
     return f"dbx_{uuid4().hex}"
 
 
+def run_as(uid: int, gid: int, script: str, *arguments: str) -> subprocess.CompletedProcess:
+    def drop_identity() -> None:
+        os.setgroups([gid])
+        os.setgid(gid)
+        os.setuid(uid)
+
+    return subprocess.run(
+        [sys.executable, "-c", script, *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        preexec_fn=drop_identity,
+    )
+
+
 def make_backends():
     BROKER_STATE_ROOT.mkdir(parents=True, exist_ok=True)
     workspace = XFSWorkspaceStorage(
@@ -34,7 +50,7 @@ def make_backends():
         inode_limit=1000,
         registry_path=BROKER_STATE_ROOT / "workspace-projects.sqlite3",
         shared_group_id=10001,
-        directory_mode=0o770,
+        directory_mode=0o2770,
     )
     snapshot = XFSWorkspaceStorage(
         SNAPSHOT_ROOT,
@@ -42,6 +58,7 @@ def make_backends():
         inode_limit=2000,
         registry_path=BROKER_STATE_ROOT / "snapshot-projects.sqlite3",
         shared_group_id=10001,
+        directory_mode=0o2770,
     )
     return workspace, snapshot
 
@@ -81,6 +98,37 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
                     exceeded = True
                     break
         assert exceeded, "Broker did not enforce the workspace XFS hard quota."
+        (workspace_path / "quota-probe.bin").unlink()
+        assert workspace_path.stat().st_gid == 10001
+        assert workspace_path.stat().st_mode & 0o2070 == 0o2070
+        assert WORKSPACE_ROOT and Path(WORKSPACE_ROOT).stat().st_mode & 0o7777 == 0o2750
+
+        denied = run_as(
+            10002,
+            10001,
+            "import sys; "
+            "try: open(sys.argv[1], 'x').close(); sys.exit(1) "
+            "except PermissionError: sys.exit(0)",
+            str(Path(WORKSPACE_ROOT) / ".worker-root-write-probe"),
+        )
+        assert denied.returncode == 0, denied.stderr
+
+        worker_file = workspace_path / "worker-created.txt"
+        worker_write = run_as(
+            10002,
+            10001,
+            "import os,sys; p=sys.argv[1]; open(p, 'w').write('worker'); os.chmod(p, 0o660)",
+            str(worker_file),
+        )
+        assert worker_write.returncode == 0, worker_write.stderr
+        runtime_write = run_as(
+            10001,
+            10001,
+            "import sys; open(sys.argv[1], 'a').write('-runtime')",
+            str(worker_file),
+        )
+        assert runtime_write.returncode == 0, runtime_write.stderr
+        assert worker_file.read_text(encoding="utf-8") == "worker-runtime"
 
         prepared = broker.api_prepare_restore_directory(
             "workspace", workspace_id, broker.QuotaRequest(multiplier=2)
@@ -88,25 +136,27 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
         stage = Path(prepared["path"])
         assert stage.is_dir()
         backup = workspace_path.parent / f".{workspace_path.name}.restore-backup"
-        swap_script = (
-            "import os, shutil; "
-            f"os.replace({str(workspace_path)!r}, {str(backup)!r}); "
-            f"os.replace({str(stage)!r}, {str(workspace_path)!r}); "
-            f"shutil.rmtree({str(backup)!r})"
+        restored_file = stage / "restored.txt"
+        stage_write = run_as(
+            10002,
+            10001,
+            "import os,sys; p=sys.argv[1]; open(p, 'w').write('restored'); os.chmod(p, 0o660)",
+            str(restored_file),
         )
-        subprocess.run(
-            [
-                "setpriv",
-                "--reuid=10001",
-                "--regid=10001",
-                "--clear-groups",
-                "python3",
-                "-c",
-                swap_script,
-            ],
-            check=True,
+        assert stage_write.returncode == 0, stage_write.stderr
+        broker.api_commit_storage_restore("workspace", workspace_id)
+        assert not stage.exists()
+        assert not backup.exists()
+        restored_file = workspace_path / "restored.txt"
+        assert restored_file.read_text(encoding="utf-8") == "restored"
+        runtime_after_restore = run_as(
+            10001,
+            10001,
+            "import sys; open(sys.argv[1], 'a').write('-runtime')",
+            str(restored_file),
         )
-        broker.api_mark_storage_initialized("workspace", workspace_id)
+        assert runtime_after_restore.returncode == 0, runtime_after_restore.stderr
+        assert restored_file.read_text(encoding="utf-8") == "restored-runtime"
 
         snapshot_path = Path(
             broker.api_ensure_storage_workspace("snapshot", snapshot_id)["path"]
