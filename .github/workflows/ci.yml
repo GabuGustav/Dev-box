@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening"]
+    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening", "phase-2-privileged-broker"]
   pull_request:
-    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces"]
+    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening"]
 
 jobs:
   quality:
@@ -17,6 +17,8 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -e ".[dev]"
+      - name: Build privileged broker image
+        run: docker build --file broker.Dockerfile --tag devbox-broker:ci .
       - name: Build restricted egress proxy
         run: docker build --file egress-proxy.Dockerfile --tag devbox-egress-proxy:ci .
       - name: Build Git-enabled workspace image
