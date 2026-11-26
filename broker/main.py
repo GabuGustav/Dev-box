@@ -510,7 +510,10 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
     if not is_clone:
         git_directory = path / ".git"
         if git_directory.is_symlink() or not git_directory.is_dir():
-            raise HTTPException(status_code=409, detail="Workspace Git metadata is missing or unsafe.")
+            raise HTTPException(
+                status_code=409,
+                detail="Workspace Git metadata is missing or unsafe.",
+            )
     environment = {
         "HOME": "/tmp",
         "TMPDIR": "/tmp",
