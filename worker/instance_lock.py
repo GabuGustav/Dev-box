@@ -22,6 +22,8 @@ def acquire_file_lock(path: Path, service_name: str) -> TextIO | None:
         return None
     if path.parent.is_symlink() or not path.parent.is_dir():
         raise RuntimeError(f"The {service_name} state directory is missing or unsafe.")
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise RuntimeError(f"The {service_name} lock path is unsafe.")
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags, 0o600)
     try:
