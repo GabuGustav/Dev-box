@@ -113,6 +113,7 @@ class SnapshotStore:
         max_snapshot_bytes: int = 10 * 1024 * 1024 * 1024,
         max_entries: int = 200_000,
         registry_path: str | Path | None = None,
+        require_group_permissions: bool = False,
     ) -> None:
         key = None
         key_error = None
@@ -140,6 +141,7 @@ class SnapshotStore:
         self.max_entries = max_entries
         self.legacy_registry = storage.root / ".devbox-snapshots.sqlite3"
         self.registry = Path(registry_path) if registry_path else self.legacy_registry
+        self.require_group_permissions = require_group_permissions
         if not self.registry.is_absolute():
             raise SnapshotError("Snapshot metadata registry path must be absolute.")
         self._migrate_legacy_registry()
@@ -193,9 +195,15 @@ class SnapshotStore:
 
     def _workspace_directory(self, workspace_id: str) -> Path:
         directory = self.storage.ensure_workspace(workspace_id)
-        directory_stat = directory.stat(follow_symlinks=False)
-        if directory_stat.st_gid != 10001 or directory_stat.st_mode & 0o070 != 0o070:
-            raise SnapshotError("Snapshot directory does not have the broker-managed workspace-group permissions.")
+        if self.require_group_permissions:
+            directory_stat = directory.stat(follow_symlinks=False)
+            if (
+                directory_stat.st_gid != 10001
+                or directory_stat.st_mode & 0o2070 != 0o2070
+            ):
+                raise SnapshotError(
+                    "Snapshot directory does not have broker-managed group permissions."
+                )
 
         if not self.registry.exists() and any(
             entry.name.endswith(".dbxsnap") or entry.name.endswith(".dbxsnap.tmp")
