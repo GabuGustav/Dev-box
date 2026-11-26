@@ -54,11 +54,12 @@ The implementation checklist and exit gates are tracked in [Phase 2 Security Har
 - [x] Move Docker lifecycle, Git helper execution, and XFS quota administration behind the private broker; worker has no Docker socket or `CAP_SYS_ADMIN` (CI run 45864319247 passed).
 - [x] Verify the Compose schema correction on the latest base (CI run 45868184349 passed).
 - [x] Verify the dedicated UID/GID `10002:10001`, non-writable XFS mount roots, worker-state migration, and broker-owned restore swaps on `phase-2-rootless-worker-hardening` (CI run 45870278489 passed: 174 unit tests, seven skipped, seven Linux integration tests).
-- [ ] Complete Git helper configuration hardening and malicious-repository tests.
-- [ ] Complete adversarial snapshot/archive and interrupted-restore recovery testing.
-- [ ] Complete proxy private-address/DNS-resolution and egress-bypass integration tests.
-- [ ] Verify container runtime profiles and cross-workspace mount/process isolation.
-- [ ] Enforce single broker/worker instances and clean up process-local workspace lock entries.
+- [x] Implement Git helper configuration overrides and add malicious fsmonitor/file-transport regression tests (CI pending).
+- [x] Reject symlink-parent archive entries and add regression coverage for duplicate paths, hard links, special entries, and file-parent collisions; fault-injected restore drills and fuzzing remain.
+- [x] Expand proxy destination blocks to NAT64/6to4 and add a DNS-to-private integration test (CI pending).
+- [x] Add Docker runtime-profile assertions while retaining cross-workspace filesystem and PID isolation integration coverage (CI pending).
+- [x] Enforce one broker and one worker per deployment with advisory volume locks; reference-count workspace locks and configure one Uvicorn worker.
+- [ ] Run Phase 2.3 CI, fix any failures, and complete restore fault injection/fuzz coverage.
 - [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed in run 45864319247; extended recovery/fuzz drills remain).
 
 ## Phase 3 — Git and repository discovery
