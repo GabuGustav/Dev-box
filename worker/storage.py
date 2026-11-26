@@ -44,6 +44,7 @@ class XFSWorkspaceStorage:
         owner_setter=_set_owner,
         registry_path: str | Path | None = None,
         shared_group_id: int | None = None,
+        directory_mode: int = 0o700,
     ) -> None:
         # Storage is provisioned on Linux, but importing/configuring the worker on
         # Windows must still accept its POSIX deployment paths. Also accept native
@@ -66,6 +67,9 @@ class XFSWorkspaceStorage:
         self.shared_group_id = shared_group_id
         if shared_group_id is not None and shared_group_id < 0:
             raise WorkspaceStorageError("Shared storage group ID must be non-negative.")
+        if directory_mode not in {0o700, 0o770}:
+            raise WorkspaceStorageError("Workspace directory mode must be 0700 or 0770.")
+        self.directory_mode = directory_mode
         self.legacy_registry = self.root / ".devbox-storage.sqlite3"
         self.registry = Path(registry_path) if registry_path else self.legacy_registry
         if not self.registry.is_absolute():
@@ -304,7 +308,7 @@ class XFSWorkspaceStorage:
             )
         if directory_existed and not directory.is_dir():
             raise WorkspaceStorageError("Workspace storage path is not a directory.")
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory.mkdir(mode=self.directory_mode, parents=True, exist_ok=True)
         if directory.is_symlink() or directory.resolve().parent != self.root.resolve():
             raise WorkspaceStorageError("Workspace storage directory escaped its root.")
         directory_stat = directory.stat(follow_symlinks=False)
@@ -318,7 +322,7 @@ class XFSWorkspaceStorage:
                 )
         try:
             self.owner_setter(directory, 10001, 10001)
-            directory.chmod(0o700)
+            directory.chmod(self.directory_mode)
         except OSError as exc:
             raise WorkspaceStorageError(
                 "Unable to assign workspace directory ownership to the unprivileged runtime user."
