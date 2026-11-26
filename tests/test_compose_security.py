@@ -98,5 +98,6 @@ def test_worker_has_no_default_or_external_network_route():
     assert "worker_api" in worker["networks"]
     assert "broker_internal" in worker["networks"]
     assert "worker_api" in api["networks"]
+    assert "broker_internal" not in api["networks"]
     assert compose["networks"]["worker_api"]["internal"] is True
     assert "egress-proxy" not in worker.get("depends_on", {})
