@@ -138,3 +138,6 @@ This design reduces the worker's direct host-root capability; it does **not** by
 - [Docker daemon socket protection](https://docs.docker.com/engine/security/protect-access/) — prefer protected Unix-socket, SSH, or mutually authenticated TLS access; do not expose unauthenticated Docker TCP.
 - [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html) — socket access is effectively host-root access and a read-only mount does not make Docker API operations read-only.
 - [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — XFS project-tree setup, clearing, and quota limit semantics.
+
+
+**Broker migration checkpoint:** CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed (146 passed, five skipped, 71% coverage; all five Linux XFS/Docker integration tests passed). Docker lifecycle and Git operations are brokered; XFS operations are the remaining privilege blocker.
