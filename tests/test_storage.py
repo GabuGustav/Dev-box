@@ -277,3 +277,67 @@ def test_restore_quota_multiplier_rejects_unsafe_values(tmp_path):
 
     with pytest.raises(WorkspaceStorageError, match="multiplier"):
         storage.set_project_quota(WORKSPACE_ID, multiplier=0)
+
+
+def test_legacy_xfs_registry_migrates_to_broker_owned_state(tmp_path):
+    root = tmp_path / "xfs-workspaces"
+    root.mkdir()
+    legacy = root / ".devbox-storage.sqlite3"
+    connection = sqlite3.connect(legacy)
+    connection.execute(
+        """CREATE TABLE workspace_projects (
+            workspace_id TEXT PRIMARY KEY,
+            project_id INTEGER NOT NULL UNIQUE,
+            directory TEXT NOT NULL UNIQUE,
+            initialized INTEGER NOT NULL DEFAULT 0,
+            device INTEGER,
+            inode INTEGER
+        )"""
+    )
+    connection.execute(
+        "INSERT INTO workspace_projects(workspace_id, project_id, directory) VALUES (?, ?, ?)",
+        (WORKSPACE_ID, 1234, str(root / "workspace-hash")),
+    )
+    connection.commit()
+    connection.close()
+
+    external_registry = tmp_path / "broker-state" / "workspace-projects.sqlite3"
+    storage = XFSWorkspaceStorage(
+        str(root),
+        "10g",
+        runner=FakeRunner(),
+        owner_setter=lambda *_: None,
+        registry_path=external_registry,
+    )
+
+    storage._migrate_legacy_registry()
+
+    assert external_registry.is_file()
+    assert not legacy.exists()
+    assert external_registry.stat().st_mode & 0o777 == 0o600
+    migrated = sqlite3.connect(external_registry)
+    row = migrated.execute(
+        "SELECT project_id FROM workspace_projects WHERE workspace_id = ?",
+        (WORKSPACE_ID,),
+    ).fetchone()
+    migrated.close()
+    assert row == (1234,)
+
+
+def test_legacy_xfs_registry_symlink_is_rejected(tmp_path):
+    root = tmp_path / "xfs-workspaces"
+    root.mkdir()
+    target = tmp_path / "outside.sqlite3"
+    target.write_text("not a database", encoding="utf-8")
+    (root / ".devbox-storage.sqlite3").symlink_to(target)
+
+    storage = XFSWorkspaceStorage(
+        str(root),
+        "10g",
+        runner=FakeRunner(),
+        owner_setter=lambda *_: None,
+        registry_path=tmp_path / "broker-state" / "workspace-projects.sqlite3",
+    )
+
+    with pytest.raises(WorkspaceStorageError, match="unsafe"):
+        storage._migrate_legacy_registry()
