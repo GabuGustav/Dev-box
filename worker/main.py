@@ -256,7 +256,7 @@ def reconcile_managed_containers() -> int:
         try:
             with workspace_lock(workspace_id):
                 snapshot_store.recover_restore(workspace_id)
-                workspace_storage.validate_backend()
+                workspace_storage.ensure_workspace(workspace_id)
                 recovered += 1
         except Exception:
             logger.exception(
