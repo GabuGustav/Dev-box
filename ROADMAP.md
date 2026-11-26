@@ -47,14 +47,15 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 ### Phase 2 security-hardening overlay
 
-The implementation checklist and exit gates are tracked in [Phase 2 Security Hardening](docs/PHASE_2_SECURITY_HARDENING.md). Phase 2 is **not security-release complete** until the deployment exposure, privileged-worker boundary, runtime isolation, storage recovery, network egress, concurrency, and CI verification gates in that plan are closed. Source-level controls and mocked tests do not substitute for Linux XFS/Docker integration and adversarial testing.
+The implementation checklist and exit gates are tracked in [Phase 2 Security Hardening](docs/PHASE_2_SECURITY_HARDENING.md) and [Rootless Worker](docs/PHASE_2_2_3_ROOTLESS_WORKER.md). Phase 2 is **not security-release complete** until the deployment exposure, privileged-worker boundary, runtime isolation, storage recovery, network egress, concurrency, and CI verification gates in that plan are closed. Source-level controls and mocked tests do not substitute for Linux XFS/Docker integration and adversarial testing.
 
 - [x] Complete source-level security investigation and record confirmed risks versus unverified hypotheses.
 - [x] Create isolated remediation branch from `phase-2-isolated-workspaces`.
 - [x] Complete deployment exposure and secret-hygiene fixes (CI run 45860830556 passed).
-- [ ] Finish reducing worker privilege with the host broker. Docker socket and Docker SDK have moved out of the worker; XFS quota administration and `CAP_SYS_ADMIN` removal remain.
-- [ ] Complete adversarial snapshot/archive and egress testing (XFS/Docker workspace integration baseline passed; adversarial archive and proxy bypass tests remain).
-- [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed; extended recovery/fuzz drills remain).
+- [x] Move Docker socket, Docker SDK, XFS quota commands, and `CAP_SYS_ADMIN` into the private broker (parent CI run 45864319247 passed).
+- [ ] Complete rootless-worker CI verification, adversarial snapshot/archive testing, and egress bypass testing.
+- [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed in run 45864319247; extended recovery/fuzz drills remain).
+- [ ] Verify the rootless worker, persistent snapshot metadata migration, and broker-owned restore swap/recovery on this branch.
 
 ## Phase 3 — Git and repository discovery
 
