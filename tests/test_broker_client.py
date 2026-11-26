@@ -104,3 +104,13 @@ def test_broker_client_preserves_gateway_timeout():
         client.run_git_helper("dbx_abcdefghijklmnopqrstuv", ["status", "--short", "--branch"])
     assert error.value.status_code == 504
     client.close()
+
+def test_broker_client_validates_authenticated_readiness():
+    def handler(request):
+        assert request.url.path == "/internal/ready"
+        assert request.headers["Authorization"] == f"Bearer {'b' * 48}"
+        return httpx.Response(200, json={"status": "ready"})
+
+    client = make_client(handler)
+    assert client.validate_connection() == {"status": "ready"}
+    client.close()
