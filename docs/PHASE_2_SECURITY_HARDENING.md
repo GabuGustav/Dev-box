@@ -23,11 +23,11 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 ## Phases and subphases
 
 ### 2.1 — Deployment exposure and secret hygiene
-- [ ] 2.1.1 Remove PostgreSQL host-port publishing; keep DB reachable only on the Compose internal service network.
-- [ ] 2.1.2 Replace hard-coded DB credentials with required environment/secret inputs; reject known placeholder values in production configuration.
-- [ ] 2.1.3 Preserve a documented local-development path without weakening production defaults.
-- [ ] 2.1.4 Define TLS termination at a reverse proxy for non-local deployments; do not pretend plain HTTP is production-safe.
-- [ ] 2.1.5 Add Compose/configuration tests for secure defaults and missing/placeholder secrets.
+- [x] 2.1.1 Remove PostgreSQL host-port publishing; keep DB reachable only on the Compose service network.
+- [x] 2.1.2 Replace hard-coded DB credentials with required environment inputs and reject known placeholder values in production configuration.
+- [x] 2.1.3 Preserve a documented local-development path with localhost-only API binding by default.
+- [x] 2.1.4 Document TLS termination at a reverse proxy for non-local deployments.
+- [ ] 2.1.5 Add Compose/configuration tests for secure defaults and missing/placeholder secrets (configuration tests added; CI execution pending).
 
 **Exit:** no public database listener by default; no committed production credentials; secure deployment requirements are executable and documented.
 
@@ -88,4 +88,4 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 - [x] Inspected Compose deployment topology, API authentication/ownership, worker Docker/XFS privileges, workspace container settings, snapshot/storage implementation, egress proxy, lifecycle locking, and CI workflow.
 - [x] Created this remediation branch from `phase-2-isolated-workspaces`.
 - [ ] Re-verify the source branch's exact head SHA and latest successful CI run before treating the baseline as release-qualified.
-- [ ] No application code or deployment behavior has been changed yet.
+- [x] Phase 2.1 implementation edits committed: Compose, environment template, production settings validation, tests, CI trigger/Compose validation, and deployment documentation. Test results are pending; do not treat Phase 2.1 as complete until Actions is green.
