@@ -25,7 +25,7 @@ The helper still reads repository-local configuration. Config such as `core.fsmo
 
 Snapshot extraction is manual rather than using `TarFile.extractall()`. It already rejects absolute paths, parent traversal, duplicate normalized paths, special files, hard links, and escaping symlinks; it enforces archive size and entry limits, delays symlink creation until after regular entries, and verifies AES-GCM authentication.
 
-The current tests cover baseline path and authentication checks, but do not systematically cover symlink-chain interactions, file/directory collisions, all special entry types, truncated archives, and every interrupted restore transition. Restore swaps are broker-owned and have a real XFS integration test; recovery idempotency and fault injection need broader coverage.
+The current tests cover baseline path and authentication checks, but review identified a concrete symlink-parent issue: an archived symlink can redirect the parent path used to create a later symlink. Each link target may pass its lexical check while the later link is actually created at a different resolved location. Reject any symlink entry nested beneath another archived symlink before creating any symlink. File/directory collisions, all special entry types, truncated archives, and every interrupted restore transition also need broader tests. Restore swaps are broker-owned and have a real XFS integration test; recovery idempotency and fault injection need broader coverage.
 
 ### 3. Egress proxy
 
@@ -56,7 +56,8 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 
 ### 2.3.2 — Snapshot archive adversarial testing
 - [ ] Add a reusable encrypted-archive fixture or focused decrypted-tar test harness.
-- [ ] Test normalized duplicate paths, file/directory collisions, symlink chains, symlink-parent paths, absolute paths, traversal, hard links, devices, FIFOs, and unsupported entry types.
+- [ ] Test normalized duplicate paths, file/directory collisions, symlink chains, symlink-parent paths (including a parent link that redirects a later link outside the stage), absolute paths, traversal, hard links, devices, FIFOs, and unsupported entry types.
+- [ ] Reject symlink entries whose ancestor path is another symlink entry before creating any symlinks.
 - [ ] Test oversized members, excessive entry counts, malformed/truncated tar headers, invalid PAX metadata, and authenticated-ciphertext tampering.
 - [ ] Add fault injection at each restore transition: stage creation, extraction, old-tree backup, stage swap, registry identity refresh, quota reset, and cleanup.
 - [ ] Prove recovery is idempotent and preserves either the previous complete tree or the restored complete tree; never expose a partial workspace.
