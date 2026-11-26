@@ -56,12 +56,14 @@ storage_backends = {
         WORKSPACE_QUOTA,
         WORKSPACE_INODE_LIMIT,
         registry_path=BROKER_STATE_ROOT / "workspace-projects.sqlite3",
+        shared_group_id=10001,
     ),
     "snapshot": XFSWorkspaceStorage(
         str(SNAPSHOT_STORAGE_ROOT),
         SNAPSHOT_QUOTA,
         SNAPSHOT_INODE_LIMIT,
         registry_path=BROKER_STATE_ROOT / "snapshot-projects.sqlite3",
+        shared_group_id=10001,
     ),
 }
 
