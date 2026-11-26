@@ -6,7 +6,7 @@ DevBox is a model-agnostic platform where AI agents can work with real repositor
 
 ## Current status
 
-**Phase 3 implementation exists, and Phase 2 security remediation is now in progress on `phase-2-security-hardening`.** The remediation branch has passed CI for deployment-default changes (108 tests passed; five Linux XFS/Docker integration tests remain skipped pending dedicated infrastructure). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
+**Phase 3 implementation exists, and Phase 2 security remediation is in progress on `phase-2-security-hardening`; the privileged broker migration is isolated on `phase-2-privileged-broker`. The broker service has been added, but the worker still retains its direct Docker socket and `CAP_SYS_ADMIN` until the migration is completed.** The remediation branch has passed CI for deployment-default changes (108 tests passed; five Linux XFS/Docker integration tests remain skipped pending dedicated infrastructure). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
 
 ## Core principles
 
@@ -45,11 +45,13 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 1. For actual workspace provisioning, use a Linux host with Docker Engine. Docker Desktop on Windows/macOS can be used for API and mocked-test development, but it does not provide the required dedicated XFS host mount.
 2. Prepare two dedicated Linux XFS filesystems: one for workspaces at `/srv/devbox/workspaces`, and one for encrypted snapshots at `/srv/devbox/snapshots`. Mount both with project quotas enabled (`prjquota` or `pquota`). Both mounts must exist before Compose starts and be visible at the same absolute paths inside the worker and to the Docker daemon. Do not format a disk that contains data; use dedicated data volumes and follow your host OS's XFS setup procedure.
 3. Copy `.env.example` to `.env`.
-4. Set `DB_PASSWORD` to a unique URL-safe random secret, `EXECUTOR_SERVICE_TOKEN` to a fresh random secret, and `SNAPSHOT_ENCRYPTION_KEY` to a generated 32-byte URL-safe base64 key. For example:
+4. Set `DB_PASSWORD` to a unique URL-safe random secret, `EXECUTOR_SERVICE_TOKEN` and `BROKER_SERVICE_TOKEN` to separate fresh random secrets, and `SNAPSHOT_ENCRYPTION_KEY` to a generated 32-byte URL-safe base64 key. For example:
 
    ```powershell
    python -c "import secrets; print(secrets.token_urlsafe(32))"
    # For EXECUTOR_SERVICE_TOKEN:
+   python -c "import secrets; print(secrets.token_urlsafe(48))"
+   # For BROKER_SERVICE_TOKEN:
    python -c "import secrets; print(secrets.token_urlsafe(48))"
    # For SNAPSHOT_ENCRYPTION_KEY:
    python -c "import secrets; print(secrets.token_urlsafe(32))"
