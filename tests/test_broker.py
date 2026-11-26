@@ -345,8 +345,11 @@ def test_broker_storage_api_delegates_only_workspace_scoped_operations(
     assert [call[0] for call in workspace.calls] == [
         "validate",
         "ensure",
+        "validate",
         "quota",
+        "validate",
         "prepare",
+        "validate",
         "mark",
         "delete",
     ]
