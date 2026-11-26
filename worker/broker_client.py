@@ -45,9 +45,13 @@ class BrokerClient:
         )
 
     def validate_config(self) -> None:
-        if len(self.token) < 32 or "replace-this-with" in self.token.lower():
+        if (
+            len(self.token) < 32
+            or "replace-this-with" in self.token.lower()
+        ):
             raise RuntimeError(
-                "DEVBOX_BROKER_TOKEN must be a unique non-placeholder secret of at least 32 characters."
+                "DEVBOX_BROKER_TOKEN must be a unique non-placeholder secret "
+                "of at least 32 characters."
             )
         parsed = httpx.URL(self.base_url)
         if (
