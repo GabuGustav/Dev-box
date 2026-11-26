@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 from fastapi import HTTPException
 
@@ -80,9 +82,7 @@ class FakeDocker:
 def workspace_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", tmp_path)
     workspace_id = "dbx_abcdefghijklmnopqrstuv"
-    _, _ = broker.names_for(workspace_id)
-    path = broker.workspace_path_for.__globals__["WORKSPACE_STORAGE_ROOT"]
-    digest_path = path / __import__("hashlib").sha256(workspace_id.encode()).hexdigest()[:32]
+    digest_path = tmp_path / hashlib.sha256(workspace_id.encode()).hexdigest()[:32]
     digest_path.mkdir()
     return workspace_id, digest_path
 
@@ -171,13 +171,35 @@ def test_start_workspace_rejects_existing_container_with_wrong_mount(
         (["status", "--short", "--branch"], False),
         (["diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color"], False),
         (["remote", "get-url", "origin"], False),
-        (["clone", "--depth", "1", "--single-branch", "--branch", "main", "--",
-         "https://github.com/example/project", "/workspace"], True),
+        (
+            [
+                "clone",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--branch",
+                "main",
+                "--",
+                "https://github.com/example/project",
+                "/workspace",
+            ],
+            True,
+        ),
         (["fetch", "--prune", "origin"], True),
         (["switch", "--create", "feature/security"], False),
         (["add", "--", "src/main.py"], False),
-        (["-c", "user.name=DevBox Agent", "-c", "user.email=devbox@localhost",
-         "commit", "-m", "secure commit"], False),
+        (
+            [
+                "-c",
+                "user.name=DevBox Agent",
+                "-c",
+                "user.email=devbox@localhost",
+                "commit",
+                "-m",
+                "secure commit",
+            ],
+            False,
+        ),
     ],
 )
 def test_git_helper_accepts_allowlisted_operations(arguments, network_enabled):
@@ -188,8 +210,20 @@ def test_git_helper_accepts_allowlisted_operations(arguments, network_enabled):
     "arguments,network_enabled",
     [
         (["sh", "-c", "id"], False),
-        (["clone", "--depth", "1", "--single-branch", "--branch", "main", "--",
-         "http://127.0.0.1/private", "/workspace"], True),
+        (
+            [
+                "clone",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--branch",
+                "main",
+                "--",
+                "http://127.0.0.1/private",
+                "/workspace",
+            ],
+            True,
+        ),
         (["status", "--short", "--branch"], True),
         (["fetch", "--prune", "origin"], False),
         (["add", "--", "../../etc/passwd"], False),
@@ -203,8 +237,11 @@ def test_git_helper_rejects_non_allowlisted_or_unsafe_operations(
         broker.validate_git_arguments(arguments, network_enabled)
     assert error.value.status_code == 422
 
+
 def test_broker_startup_rejects_placeholder_or_short_token(monkeypatch):
-    monkeypatch.setattr(broker, "SERVICE_TOKEN", "replace-this-with-a-different-long-random-secret")
+    monkeypatch.setattr(
+        broker, "SERVICE_TOKEN", "replace-this-with-a-different-long-random-secret"
+    )
     with pytest.raises(RuntimeError, match="non-placeholder"):
         broker.validate_service_token()
 
