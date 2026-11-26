@@ -308,9 +308,12 @@ def start_workspace(workspace_id: str) -> dict:
 
 def stop_workspace(workspace_id: str) -> dict:
     container_name, _ = names_for(workspace_id)
-    path = workspace_path_for(workspace_id)
     try:
         container = docker_client.containers.get(container_name)
+    except NotFound:
+        return _workspace_result(workspace_id)
+    try:
+        path = workspace_path_for(workspace_id)
         container.reload()
         if not _container_identity_is_valid(container, workspace_id, path):
             _stop_unsafe_container(container, "workspace identity or storage binding mismatch")
@@ -322,8 +325,9 @@ def stop_workspace(workspace_id: str) -> dict:
             container.stop(timeout=10)
         container.reload()
         return _workspace_result(workspace_id, container)
-    except NotFound:
-        return _workspace_result(workspace_id)
+    except HTTPException:
+        _stop_unsafe_container(container, "workspace storage path is missing or unsafe")
+        raise
 
 
 def pause_workspace(workspace_id: str) -> dict:
