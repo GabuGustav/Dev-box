@@ -152,6 +152,49 @@ class BrokerClient:
             raise BrokerUnavailable("Broker returned an invalid reconciliation result.")
         return removed
 
+    def validate_storage(self, storage_kind: str) -> dict[str, Any]:
+        return self._request("GET", f"/internal/storage/{storage_kind}/validate")
+
+    def ensure_storage_workspace(
+        self, storage_kind: str, workspace_id: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST", f"/internal/storage/{storage_kind}/{workspace_id}/ensure"
+        )
+
+    def set_storage_quota(
+        self, storage_kind: str, workspace_id: str, multiplier: int
+    ) -> dict[str, Any]:
+        return self._request(
+            "PUT",
+            f"/internal/storage/{storage_kind}/{workspace_id}/quota",
+            json={"multiplier": multiplier},
+        )
+
+    def prepare_restore_directory(
+        self, storage_kind: str, workspace_id: str, multiplier: int
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/internal/storage/{storage_kind}/{workspace_id}/prepare-restore",
+            json={"multiplier": multiplier},
+        )
+
+    def mark_storage_initialized(
+        self, storage_kind: str, workspace_id: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/internal/storage/{storage_kind}/{workspace_id}/mark-initialized",
+        )
+
+    def delete_storage_workspace(
+        self, storage_kind: str, workspace_id: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "DELETE", f"/internal/storage/{storage_kind}/{workspace_id}"
+        )
+
     def run_git_helper(
         self,
         workspace_id: str,
