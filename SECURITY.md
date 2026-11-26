@@ -124,3 +124,31 @@ Provide:
 - Malicious filenames, symlinks, and archive entries cannot escape the workspace.
 - Operation-scoped provider credentials do not persist into workspace files or snapshots; credentials already written into a workspace are treated as sensitive encrypted snapshot content and must be rotated or removed.
 - Cancellation terminates child processes and releases resources.
+
+
+## 12. Phase 2 audit status (2026-11-26)
+
+The current implementation has useful baseline controls, but must not be described as production-ready for hostile multi-tenant execution.
+
+### Confirmed deployment risks
+
+- The reviewed Compose configuration publishes PostgreSQL on host port 5432 and supplies static `devbox/devbox` credentials. Remove host publication and inject deployment-specific secrets.
+- The reviewed Compose configuration publishes the API on host port 8000 and starts Uvicorn directly over HTTP. This is for trusted local development only; external deployments require TLS termination and a documented trusted-proxy configuration.
+- The worker mounts the Docker socket and receives `CAP_SYS_ADMIN` for Docker/XFS operations. Compromise of this process can compromise the host. This is an elevated trust-boundary risk, not proof of a remotely exploitable path.
+
+### Controls observed in source
+
+Workspace containers run as a non-root user, drop Linux capabilities, use a read-only root filesystem, enable `no-new-privileges`, use private PID/IPC namespaces, apply CPU/memory/PID limits, and default to no network. Snapshot code uses authenticated AES-GCM encryption and rejects multiple unsafe archive entry types. API keys are stored as hashes and workspace ownership checks are present in the inspected routes.
+
+These controls reduce risk but do not establish a VM-equivalent isolation boundary.
+
+### Verification still required
+
+- Adversarial container escape and cross-workspace tests on supported Linux hosts.
+- Explicit seccomp/AppArmor/SELinux policy validation and user-namespace assessment.
+- Proxy bypass, DNS rebinding, IPv4/IPv6, and metadata endpoint tests.
+- Malicious snapshot archive, interrupted restore, and concurrent operation tests.
+- Real XFS quota, Docker persistence, backup, and restore drills.
+- Distributed locking before multiple worker processes or replicas are supported.
+
+Track implementation and evidence in [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md). Do not mark an item complete based on a documentation change or mocked test alone.
