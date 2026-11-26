@@ -401,13 +401,16 @@ def resume_workspace(workspace_id: str) -> dict:
 @serialize_workspace_operation
 def create_snapshot(workspace_id: str) -> dict:
     store = require_snapshot_store()
-    container_name, _ = names_for(workspace_id)
+    names_for(workspace_id)
     try:
         store.recover_restore(workspace_id)
         workspace_path = workspace_storage.ensure_workspace(workspace_id)
         was_running = False
         try:
-            container = docker_client.containers.get(container_name)
+            container = broker_call(lambda: broker_client.get_workspace(workspace_id))
+        except BrokerNotFound:
+            container = None
+        if container is not None:
             container.reload()
             mounts = container.attrs.get("Mounts", [])
             workspace_mount = next(
@@ -415,6 +418,7 @@ def create_snapshot(workspace_id: str) -> dict:
                 None,
             )
             if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+                _stop_unsafe_container(container, "workspace container mount mismatch")
                 raise HTTPException(
                     status_code=409,
                     detail="Workspace container is not attached to its assigned storage.",
@@ -422,21 +426,16 @@ def create_snapshot(workspace_id: str) -> dict:
             if container.status == "running":
                 container.pause()
                 was_running = True
-            elif container.status == "paused":
-                pass
-            elif container.status not in {"created", "exited"}:
+            elif container.status != "paused" and container.status not in {"created", "exited"}:
                 raise HTTPException(
                     status_code=409,
                     detail=f"Cannot snapshot a workspace in state {container.status}.",
                 )
-        except NotFound:
-            container = None
         try:
-            snapshot = store.create(workspace_id, workspace_path)
+            return store.create(workspace_id, workspace_path)
         finally:
             if was_running and container is not None:
                 container.unpause()
-        return snapshot
     except SnapshotConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (WorkspaceStorageError, SnapshotError) as exc:
@@ -463,7 +462,7 @@ def list_snapshots(workspace_id: str) -> dict:
 @serialize_workspace_operation
 def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
     store = require_snapshot_store()
-    container_name, _ = names_for(workspace_id)
+    names_for(workspace_id)
     try:
         store.recover_restore(workspace_id)
         workspace_storage.validate_backend()
@@ -476,7 +475,11 @@ def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
                 detail="Workspace storage path is not a safe directory for restore.",
             )
         try:
-            container = docker_client.containers.get(container_name)
+            container = broker_call(lambda: broker_client.get_workspace(workspace_id))
+        except BrokerNotFound:
+            container = None
+        container_id = None
+        if container is not None:
             container.reload()
             if container.status in {"running", "paused"}:
                 raise HTTPException(
@@ -489,13 +492,12 @@ def restore_snapshot(workspace_id: str, snapshot_id: str) -> dict:
                 None,
             )
             if workspace_mount is None or workspace_mount.get("Source") != str(workspace_path):
+                _stop_unsafe_container(container, "workspace container mount mismatch")
                 raise HTTPException(
                     status_code=409,
                     detail="Workspace container is not attached to its assigned storage.",
                 )
             container_id = container.id
-        except NotFound:
-            container_id = None
         result = store.restore(workspace_id, snapshot_id, workspace_path)
         result["container_id"] = container_id
         result["storage_ref"] = names_for(workspace_id)[1]
@@ -528,7 +530,7 @@ def delete_snapshot(workspace_id: str, snapshot_id: str) -> dict:
 )
 @serialize_workspace_operation
 def delete_workspace(workspace_id: str) -> dict:
-    container_name, volume_name = names_for(workspace_id)
+    _, volume_name = names_for(workspace_id)
     try:
         snapshot_store.recover_restore(workspace_id)
         _, workspace_path = workspace_storage._workspace_path(workspace_id)
@@ -538,11 +540,8 @@ def delete_workspace(workspace_id: str) -> dict:
             workspace_storage.validate_backend()
     except (WorkspaceStorageError, SnapshotError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    try:
-        container = docker_client.containers.get(container_name)
-        container.remove(force=True, v=True)
-    except NotFound:
-        pass
+
+    broker_call(lambda: broker_client.delete_workspace(workspace_id))
     try:
         snapshot_store.delete_workspace(workspace_id)
         workspace_storage.delete_workspace(workspace_id)
@@ -554,8 +553,6 @@ def delete_workspace(workspace_id: str) -> dict:
         "storage_ref": volume_name,
         "state": "deleted",
     }
-
-
 
 
 @app.post(
