@@ -78,3 +78,29 @@ def test_xfs_tools_are_installed_only_in_broker_image():
     assert "util-linux" not in worker_dockerfile
     assert "xfsprogs" in broker_dockerfile
     assert "util-linux" in broker_dockerfile
+
+
+def test_worker_runs_rootless_with_no_capabilities_and_read_only_root():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    assert worker["user"] == "10002:10001"
+    assert worker["read_only"] is True
+    assert worker["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in worker["security_opt"]
+    assert any(item.startswith("/tmp:rw,noexec,nosuid") for item in worker["tmpfs"])
+    assert "cap_add" not in worker
+
+
+def test_worker_state_is_persistent_and_not_shared_with_api_or_workspace():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    broker = compose["services"]["broker"]
+    assert "worker_state:/var/lib/devbox-worker" in worker["volumes"]
+    assert "worker_state:/var/lib/devbox-worker" in broker["volumes"]
+    assert "broker_state:/var/lib/devbox-broker" not in worker["volumes"]
+    assert "DEVBOX_SNAPSHOT_REGISTRY_PATH" in worker["environment"]
+
+
+def test_worker_image_declares_dedicated_non_root_user():
+    dockerfile = Path("worker.Dockerfile").read_text(encoding="utf-8")
+    assert "USER 10002:10001" in dockerfile
