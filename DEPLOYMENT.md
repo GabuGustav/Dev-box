@@ -15,7 +15,7 @@
 
 PostgreSQL is intentionally not published to the host. The API reaches it over the Compose service network. The API is published on host loopback only by default.
 
-The privileged broker initializes the persistent `worker_state` volume with owner UID/GID `10002:10001` and mode `0700` before the worker starts. The worker runs with that identity, no Linux capabilities, `no-new-privileges`, a read-only container root, bounded writable tmpfs mounts, and the separate worker-state volume. The broker alone mounts `broker_state` and owns XFS project registries. Do not manually change ownership or permissions on these named volumes.
+The privileged broker initializes the persistent `worker_state` volume with owner UID/GID `10002:10001` and mode `0700` before the worker starts. The worker runs with that identity, no Linux capabilities, `no-new-privileges`, a read-only container root, bounded writable tmpfs mounts, and the separate worker-state volume. The broker alone mounts `broker_state` and owns XFS project registries. Do not manually change ownership or permissions on these named volumes. See [Phase 2.2.3 Rootless Worker](docs/PHASE_2_2_3_ROOTLESS_WORKER.md) for the storage permission contract and upgrade behavior.
 
 ## External deployment
 
