@@ -374,6 +374,8 @@ class FakeRestoreStorage:
     def __init__(self, root):
         self.root = root
         self.calls = []
+        self.fail_mark = False
+        self.fail_quota = False
 
     def validate_backend(self):
         return None
@@ -384,9 +386,13 @@ class FakeRestoreStorage:
 
     def mark_workspace_initialized(self, workspace_id, directory):
         self.calls.append(("mark", workspace_id, directory))
+        if self.fail_mark:
+            raise WorkspaceStorageError("injected registry update failure")
 
     def set_project_quota(self, workspace_id, multiplier=1):
         self.calls.append(("quota", workspace_id, multiplier))
+        if self.fail_quota:
+            raise WorkspaceStorageError("injected quota update failure")
 
 
 def test_broker_commit_restore_performs_and_registers_directory_swap(tmp_path, monkeypatch):
@@ -650,3 +656,31 @@ def test_broker_restore_swap_failure_rolls_back_and_recovery_is_idempotent(
     assert second_recovery["state"] == "recovered"
     assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
     assert not stage.exists()
+
+
+@pytest.mark.parametrize("failure_point", ["mark", "quota"])
+def test_broker_restore_metadata_failures_roll_back_to_previous_tree(
+    tmp_path, monkeypatch, failure_point
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    if failure_point == "mark":
+        storage.fail_mark = True
+    else:
+        storage.fail_quota = True
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "previous.txt").write_text("previous", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "restored.txt").write_text("restored", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as error:
+        broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert error.value.status_code == 503
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert not (workspace / "restored.txt").exists()
+    assert not stage.exists()
+    assert not (tmp_path / f".{workspace.name}.restore-backup").exists()
