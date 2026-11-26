@@ -1,10 +1,19 @@
 import os
 import secrets
+from pathlib import Path
 
 import pytest
 
 from worker.snapshots import SnapshotStore
 from worker.storage import XFSWorkspaceStorage
+
+BROKER_STATE_ROOT = Path(os.getenv("DEVBOX_TEST_BROKER_STATE_ROOT", "/tmp/devbox-broker-state"))
+
+
+def broker_registry(name: str) -> Path:
+    BROKER_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    return BROKER_STATE_ROOT / name
+
 
 WORKSPACE_ROOT = os.getenv("DEVBOX_TEST_XFS_ROOT")
 SNAPSHOT_ROOT = os.getenv("DEVBOX_TEST_SNAPSHOT_XFS_ROOT")
@@ -20,8 +29,18 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_encrypted_snapshot_restore_on_separate_xfs_mounts():
-    workspace_storage = XFSWorkspaceStorage(WORKSPACE_ROOT, "128m", inode_limit=5000)
-    snapshot_storage = XFSWorkspaceStorage(SNAPSHOT_ROOT, "256m", inode_limit=5000)
+    workspace_storage = XFSWorkspaceStorage(
+        WORKSPACE_ROOT,
+        "128m",
+        inode_limit=5000,
+        registry_path=broker_registry("workspace-projects.sqlite3"),
+    )
+    snapshot_storage = XFSWorkspaceStorage(
+        SNAPSHOT_ROOT,
+        "256m",
+        inode_limit=5000,
+        registry_path=broker_registry("snapshot-projects.sqlite3"),
+    )
     store = SnapshotStore(
         snapshot_storage,
         workspace_storage,

@@ -1,10 +1,19 @@
 import errno
 import os
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 from worker.storage import XFSWorkspaceStorage
+
+BROKER_STATE_ROOT = Path(os.getenv("DEVBOX_TEST_BROKER_STATE_ROOT", "/tmp/devbox-broker-state"))
+
+
+def broker_registry(name: str) -> Path:
+    BROKER_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    return BROKER_STATE_ROOT / name
+
 
 XFS_TEST_ROOT = os.getenv("DEVBOX_TEST_XFS_ROOT")
 pytestmark = pytest.mark.skipif(
@@ -18,7 +27,12 @@ def new_workspace_id() -> str:
 
 
 def test_kernel_enforces_workspace_block_quota():
-    storage = XFSWorkspaceStorage(XFS_TEST_ROOT, "16m", inode_limit=1000)
+    storage = XFSWorkspaceStorage(
+        XFS_TEST_ROOT,
+        "16m",
+        inode_limit=1000,
+        registry_path=broker_registry("workspace-projects.sqlite3"),
+    )
     workspace_id = new_workspace_id()
     directory = storage.ensure_workspace(workspace_id)
     exceeded = False
@@ -40,7 +54,12 @@ def test_kernel_enforces_workspace_block_quota():
 
 
 def test_kernel_enforces_workspace_inode_quota():
-    storage = XFSWorkspaceStorage(XFS_TEST_ROOT, "64m", inode_limit=16)
+    storage = XFSWorkspaceStorage(
+        XFS_TEST_ROOT,
+        "64m",
+        inode_limit=16,
+        registry_path=broker_registry("workspace-projects.sqlite3"),
+    )
     workspace_id = new_workspace_id()
     directory = storage.ensure_workspace(workspace_id)
     exceeded = False

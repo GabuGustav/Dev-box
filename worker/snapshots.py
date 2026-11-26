@@ -157,7 +157,6 @@ class SnapshotStore:
     def _workspace_directory(self, workspace_id: str) -> Path:
         directory = self.storage.ensure_workspace(workspace_id)
         try:
-            self.storage.owner_setter(directory, 0, 0)
             directory.chmod(0o700)
         except OSError as exc:
             raise SnapshotError("Unable to secure the snapshot directory.") from exc
@@ -458,7 +457,7 @@ class SnapshotStore:
                         raise SnapshotError("Snapshot path escapes the restore directory.")
                     if member.isdir():
                         destination.mkdir(parents=True, exist_ok=True)
-                        destination.chmod(0o755)
+                        destination.chmod(0o770)
                     elif member.issym():
                         symlinks.append((destination, member.linkname))
                     else:
@@ -468,7 +467,7 @@ class SnapshotStore:
                             raise SnapshotError("Snapshot file contents are unavailable.")
                         with input_file, destination.open("xb") as output_file:
                             shutil.copyfileobj(input_file, output_file, CHUNK_SIZE)
-                        destination.chmod(0o755 if member.mode & 0o111 else 0o644)
+                        destination.chmod(0o770 if member.mode & 0o111 else 0o660)
             reader.verify()
 
         for destination, target in symlinks:
@@ -477,12 +476,6 @@ class SnapshotStore:
                 raise SnapshotError("Snapshot symbolic link collides with another entry.")
             os.symlink(target, destination)
 
-        for root, directories, files in os.walk(staging, topdown=True, followlinks=False):
-            for name in directories + files:
-                path = Path(root) / name
-                if not path.is_symlink():
-                    self.workspace_storage.owner_setter(path, 10001, 10001)
-            self.workspace_storage.owner_setter(Path(root), 10001, 10001)
 
     def recover_restore(self, workspace_id: str) -> None:
         self.workspace_storage.validate_backend()

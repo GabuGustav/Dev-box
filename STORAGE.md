@@ -2,7 +2,7 @@
 
 ## Decision
 
-Workspace data uses **one directory tree per workspace on a dedicated Linux XFS filesystem with project quotas enabled**. The worker uses xfs_quota to assign a project ID and enforce both a hard block limit and a hard inode limit.
+Workspace data uses **one directory tree per workspace on a dedicated Linux XFS filesystem with project quotas enabled**. The privileged broker uses xfs_quota to assign a project ID and enforce both a hard block limit and a hard inode limit. The worker calls the broker through authenticated, workspace-scoped storage operations.
 
 This is the selected production backend. The ordinary Docker local named-volume driver is not used for workspace data because it does not provide a portable hard per-volume quota.
 
@@ -11,9 +11,11 @@ This is the selected production backend. The ordinary Docker local named-volume 
 - Linux host with one dedicated XFS filesystem for workspace data and a second dedicated XFS filesystem for encrypted snapshots.
 - The filesystem mounted with prjquota (or pquota).
 - Project quota accounting and enforcement both enabled.
-- xfsprogs and findmnt available in the worker image.
-- The host storage path mounted into the worker at the **same absolute path** used by the Docker daemon.
-- The worker runs as a trusted privileged service with CAP_SYS_ADMIN and access to the Docker socket.
+- xfsprogs and findmnt available in the privileged broker image; the worker image does not contain XFS administration tools.
+- The broker has `CAP_SYS_ADMIN` and is the only service with Docker socket access.
+- The worker runs as non-root UID/GID 10001 with all Linux capabilities dropped.
+- The host storage paths mounted into both the broker and worker at the **same absolute paths** used by the Docker daemon.
+- The broker validates the XFS mounts and sets the storage roots to group 10001 with mode `2770`; workspace directories are provisioned for UID/GID 10001 with mode `0770` so the non-root worker and workspace containers can access them.
 
 Do not place workspace data on the root filesystem or a directory shared with unrelated host data. Do not format a disk containing data. Provision and mount a dedicated data device using the host operating system's documented XFS procedure.
 
@@ -50,20 +52,20 @@ SNAPSHOT_ENCRYPTION_KEY=<32-byte-url-safe-base64-key>
 
 Generate the encryption key once with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Store it in a secret manager or protected deployment environment, and keep a secure backup separate from the snapshot filesystem. Losing this key makes the snapshots permanently unrecoverable; changing it without re-encrypting existing snapshots has the same effect.
 
-Both host directories must exist and already be mounted. Compose bind-mounts them into the worker using the same absolute paths. The snapshot filesystem is separate so snapshot retention cannot consume the live workspace filesystem's capacity. If custom paths are selected, use those exact paths in .env.
+Both host directories must exist and already be mounted. Compose bind-mounts them into the broker and worker using the same absolute paths. The snapshot filesystem is separate so snapshot retention cannot consume the live workspace filesystem's capacity. If custom paths are selected, use those exact paths in .env.
 
 ## Provisioning contract
 
 For each workspace:
 
-1. Validate the workspace ID and derive a stable storage directory name from its SHA-256 digest.
-2. Verify the storage root is itself a mountpoint, is XFS, and has project quota enforcement enabled. A directory merely located somewhere on an XFS filesystem is rejected.
-3. Allocate a deterministic 31-bit XFS project ID. A persistent SQLite registry enforces uniqueness and maps the workspace ID, project ID, and directory.
-4. Initialize the XFS project tree once with the xfs_quota project -s operation; record that initialization in the persistent registry.
-5. Reapply bhard and ihard limits before each start/resume, without recursively walking an already initialized tree.
-6. Set the directory owner to UID/GID 10001, then bind-mount only that directory at /workspace.
+1. The worker validates the workspace ID and requests a storage operation using only the workspace ID and a bounded quota multiplier.
+2. The broker verifies the storage root is itself a mountpoint, is XFS, and has project quota enforcement enabled. A directory merely located somewhere on an XFS filesystem is rejected.
+3. The broker allocates a deterministic 31-bit XFS project ID. A persistent SQLite registry in the broker-only `broker_state` volume enforces uniqueness and maps the workspace ID, project ID, and directory.
+4. The broker initializes the XFS project tree once with the `xfs_quota project -s` operation and records that initialization in the persistent registry.
+5. The broker reapplies `bhard` and `ihard` limits before each start/resume, without recursively walking an already initialized tree.
+6. The broker sets the directory owner to UID/GID 10001 and mode `0770`; only the workspace's own directory is bind-mounted at `/workspace`.
 
-The registry is stored on the dedicated storage filesystem, outside individual workspace directories. It maps workspace IDs to project IDs and paths and records each directory's device/inode identity. Missing or replaced registered directories fail closed instead of being silently recreated; restore them from a snapshot. The registry is required state: if it is missing while other storage data exists, provisioning fails closed. Back it up together with the workspace filesystem. Do not manually delete or edit it.
+The project registry is stored in the broker-only `broker_state` Docker volume, outside both XFS filesystems and inaccessible to the worker. It maps workspace IDs to project IDs and paths and records each directory's device/inode identity. A one-time migration copies the legacy `.devbox-storage.sqlite3` registry into broker-owned state. Missing or replaced registered directories fail closed instead of being silently recreated; restore them from a snapshot. The registry is required state: if it is missing while other storage data exists, provisioning fails closed. Back up the `broker_state` volume together with both XFS filesystems and the snapshot encryption key. Do not manually delete or edit it.
 
 The API's storage_ref is an opaque backend reference, not a Docker volume name or a credential.
 
@@ -144,3 +146,10 @@ Real XFS/Docker integration, adversarial snapshot archive tests, interrupted-res
 
 
 **PID namespace note:** Docker uses a private PID namespace by default. Do not pass `pid_mode="private"` to the Docker API; that value is invalid. DevBox now relies on the default (unset) PID mode and verifies process isolation in the Docker integration test.
+
+
+## Privilege boundary
+
+- **Broker:** runs with Docker socket access and `CAP_SYS_ADMIN`; it owns the XFS project registries and is the only service that runs `findmnt`/`xfs_quota` operations. Its API exposes fixed workspace-scoped operations and bounded quota multipliers, not arbitrary host paths or Docker API passthrough.
+- **Worker:** runs as UID/GID 10001, has no Docker SDK/socket, no XFS tools, no `CAP_SYS_ADMIN`, and no Linux capabilities. Its root filesystem is read-only. It can access the shared workspace and snapshot mounts as UID 10001 so it can read, write, and atomically restore workspace files.
+- **Residual trust:** the worker can access every workspace directory on the shared mounts. The current design reduces host-level privilege but does not protect tenant data from a compromised worker. Per-workspace host identities or microVMs remain necessary for hostile multi-tenant guarantees.

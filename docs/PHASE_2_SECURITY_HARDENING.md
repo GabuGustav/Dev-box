@@ -32,7 +32,8 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 **Exit:** no public database listener by default; no committed production credentials; secure deployment requirements are executable and documented.
 
 ### 2.2 — Privileged worker boundary
-- [ ] 2.2.1 Map every operation requiring Docker API access and XFS administration.
+Detailed implementation plan: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md). Work is isolated on branch `phase-2-privileged-broker`.
+- [x] 2.2.1 Map every operation requiring Docker API access and XFS administration.
 - [ ] 2.2.2 Design a narrow privileged host broker for the minimum Docker/XFS operations, with typed requests, strict workspace/path validation, and no arbitrary Docker API passthrough.
 - [ ] 2.2.3 Separate unprivileged worker orchestration from the privileged broker.
 - [ ] 2.2.4 Authenticate broker calls, restrict its network reachability, and add audit logging.
@@ -137,3 +138,6 @@ This design reduces the worker's direct host-root capability; it does **not** by
 - [Docker daemon socket protection](https://docs.docker.com/engine/security/protect-access/) — prefer protected Unix-socket, SSH, or mutually authenticated TLS access; do not expose unauthenticated Docker TCP.
 - [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html) — socket access is effectively host-root access and a read-only mount does not make Docker API operations read-only.
 - [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — XFS project-tree setup, clearing, and quota limit semantics.
+
+
+**Broker migration checkpoint:** CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed (146 passed, five skipped, 71% coverage; all five Linux XFS/Docker integration tests passed). Docker lifecycle and Git operations are brokered; XFS operations are the remaining privilege blocker.

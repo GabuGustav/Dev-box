@@ -176,3 +176,18 @@ CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830
 The integration run caught and led to correction of an invalid explicit Docker `pid_mode="private"` value. DevBox now relies on Docker's default private PID namespace, and the integration test verifies the isolation behavior.
 
 This verifies the current baseline and Phase 2.1 deployment hardening; it does **not** complete the privileged-worker boundary, adversarial snapshot archive fuzzing, proxy bypass/DNS rebinding testing, distributed concurrency, or hostile-tenant isolation goals.
+
+
+## 15. Privileged broker migration status
+
+The `phase-2-privileged-broker` branch now contains a broker service skeleton, a separate broker token, an internal-only Compose network, fixed workspace container lifecycle operations, a Git helper command allowlist, and broker authorization/configuration tests.
+
+**This is not yet a privilege reduction in the running stack.** The worker no longer mounts `/var/run/docker.sock` and no longer includes the Docker SDK. It still receives `CAP_SYS_ADMIN` because XFS quota commands remain local. The broker is now the only service with Docker daemon access; it also has `CAP_SYS_ADMIN` for the upcoming XFS migration. Do not deploy this intermediate branch as a hardened production release. The worker-to-broker migration and XFS quota delegation must complete before the worker's socket and capability are removed.
+
+
+The initial broker service skeleton passed CI run [45862764928](https://github.com/GabuGustav/Dev-box/actions/runs/45862764928): 132 tests passed, five were skipped in the quality job, Ruff and all image builds passed, and the separate XFS/Docker integration job passed all five integration tests. Broker-inclusive coverage is 69%.
+
+The broker's typed workspace and Git operations are not yet used by the worker. The worker still has its original Docker socket mount and `CAP_SYS_ADMIN`; no privilege reduction should be claimed until those are removed after migration.
+
+
+CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed: 146 tests passed, five skipped, 71% broker-inclusive coverage, all image builds and Compose validation passed, and all five real XFS/Docker integration tests passed. The worker-to-broker Docker migration is verified; XFS delegation is the remaining worker capability blocker.

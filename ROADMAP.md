@@ -26,7 +26,7 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 ## Phase 2 — Isolated persistent workspaces
 
-- [x] Add a separate trusted worker supervisor; keep Docker socket access out of the API and workspace containers.
+- [x] Add a separate worker supervisor and privileged broker; keep Docker socket access out of the API, worker, and workspace containers.
 - [x] Provision one non-root container and persistent XFS-backed directory per workspace.
 - [x] Add owner-scoped start, stop, pause, resume, and delete API operations.
 - [x] Apply container CPU, memory, PID, capability, read-only-rootfs, and network-isolation settings.
@@ -41,9 +41,9 @@ This roadmap sequences the project so each phase produces a testable result. Est
 - [ ] Run adversarial host-escape and privilege-boundary testing.
 - [ ] Add execution wall-clock limits with the job runner in Phase 4.
 
-**Current Phase 2 boundary:** the executor creates persistent XFS-backed workspace directories with hard block and inode limits, applies container-level hardening, and supports encrypted snapshots on a separate quota-limited XFS mount. Workspaces have no network access yet, so repository cloning and dependency installation wait for controlled egress in Phase 3.
+**Current Phase 2 boundary:** the executor creates persistent XFS-backed workspace directories with hard block and inode limits, applies container-level hardening, and supports encrypted snapshots on a separate quota-limited XFS mount. Workspace containers remain network-isolated; Git helper containers use only the restricted allowlisted egress proxy implemented in Phase 3.
 
-**Exit criteria:** not yet met. Snapshot implementation, periodic unsafe-mount enforcement, and API/database lifecycle reconciliation are implemented. Real XFS/Docker integration runs, backup/restore drills, and adversarial isolation testing are still required.
+**Exit criteria:** not yet met. Snapshot implementation, periodic unsafe-mount enforcement, API/database lifecycle reconciliation, and the baseline five-test Linux XFS/Docker integration job are implemented. Extended recovery drills and adversarial isolation testing are still required.
 
 ### Phase 2 security-hardening overlay
 
@@ -52,7 +52,7 @@ The implementation checklist and exit gates are tracked in [Phase 2 Security Har
 - [x] Complete source-level security investigation and record confirmed risks versus unverified hypotheses.
 - [x] Create isolated remediation branch from `phase-2-isolated-workspaces`.
 - [x] Complete deployment exposure and secret-hygiene fixes (CI run 45860830556 passed).
-- [ ] Reduce privileged-worker blast radius with a narrowly scoped host broker.
+- [ ] Finish reducing worker privilege with the host broker. Docker socket and Docker SDK have moved out of the worker; XFS quota administration and `CAP_SYS_ADMIN` removal remain.
 - [ ] Complete adversarial snapshot/archive and egress testing (XFS/Docker workspace integration baseline passed; adversarial archive and proxy bypass tests remain).
 - [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed; extended recovery/fuzz drills remain).
 

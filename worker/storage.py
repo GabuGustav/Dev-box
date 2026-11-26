@@ -42,6 +42,9 @@ class XFSWorkspaceStorage:
         *,
         runner=subprocess.run,
         owner_setter=_set_owner,
+        registry_path: str | Path | None = None,
+        shared_group_id: int | None = None,
+        directory_mode: int = 0o700,
     ) -> None:
         # Storage is provisioned on Linux, but importing/configuring the worker on
         # Windows must still accept its POSIX deployment paths. Also accept native
@@ -61,7 +64,16 @@ class XFSWorkspaceStorage:
         self.inode_limit = inode_limit
         self.runner = runner
         self.owner_setter = owner_setter
-        self.registry = self.root / ".devbox-storage.sqlite3"
+        self.shared_group_id = shared_group_id
+        if shared_group_id is not None and shared_group_id < 0:
+            raise WorkspaceStorageError("Shared storage group ID must be non-negative.")
+        if directory_mode not in {0o700, 0o770}:
+            raise WorkspaceStorageError("Workspace directory mode must be 0700 or 0770.")
+        self.directory_mode = directory_mode
+        self.legacy_registry = self.root / ".devbox-storage.sqlite3"
+        self.registry = Path(registry_path) if registry_path else self.legacy_registry
+        if not self.registry.is_absolute():
+            raise WorkspaceStorageError("Workspace registry path must be absolute.")
 
     def _run(self, *args: str) -> str:
         try:
@@ -105,6 +117,14 @@ class XFSWorkspaceStorage:
             raise WorkspaceStorageError(
                 "XFS project quota accounting and enforcement must both be active."
             )
+        if self.shared_group_id is not None:
+            try:
+                self.owner_setter(self.root, 0, self.shared_group_id)
+                self.root.chmod(0o2770)
+            except OSError as exc:
+                raise WorkspaceStorageError(
+                    "Unable to grant the unprivileged worker group access to storage root."
+                ) from exc
 
     def _workspace_path(self, workspace_id: str) -> tuple[str, Path]:
         if not WORKSPACE_ID_PATTERN.fullmatch(workspace_id):
@@ -116,7 +136,39 @@ class XFSWorkspaceStorage:
         digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()
         return (int(digest[:8], 16) & 0x7FFFFFFF) or 1
 
+    def _migrate_legacy_registry(self) -> None:
+        if self.registry.is_symlink():
+            raise WorkspaceStorageError("Broker-owned workspace registry is unsafe.")
+        if self.registry == self.legacy_registry or self.registry.exists():
+            return
+        legacy = self.legacy_registry
+        if not legacy.exists():
+            return
+        if legacy.is_symlink() or not legacy.is_file():
+            raise WorkspaceStorageError("Legacy workspace registry is unsafe.")
+        try:
+            self.registry.parent.mkdir(parents=True, exist_ok=True)
+            source = sqlite3.connect(legacy)
+            destination = sqlite3.connect(self.registry)
+            try:
+                source.backup(destination)
+                destination.commit()
+            finally:
+                destination.close()
+                source.close()
+            self.registry.chmod(0o600)
+            legacy.unlink()
+        except (OSError, sqlite3.Error) as exc:
+            raise WorkspaceStorageError(
+                "Unable to migrate the workspace project registry to broker-owned storage."
+            ) from exc
+
     def _connect(self) -> sqlite3.Connection:
+        if self.registry.is_symlink():
+            raise WorkspaceStorageError("Workspace project registry is an unexpected symlink.")
+        if self.registry.exists() and not self.registry.is_file():
+            raise WorkspaceStorageError("Workspace project registry is not a regular file.")
+        self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30, isolation_level=None)
         connection.execute(
             """CREATE TABLE IF NOT EXISTS workspace_projects (
@@ -232,6 +284,7 @@ class XFSWorkspaceStorage:
     def ensure_workspace(self, workspace_id: str) -> Path:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
+        self._migrate_legacy_registry()
         if not self.registry.exists():
             unexpected_entries = [
                 entry
@@ -255,7 +308,7 @@ class XFSWorkspaceStorage:
             )
         if directory_existed and not directory.is_dir():
             raise WorkspaceStorageError("Workspace storage path is not a directory.")
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory.mkdir(mode=self.directory_mode, parents=True, exist_ok=True)
         if directory.is_symlink() or directory.resolve().parent != self.root.resolve():
             raise WorkspaceStorageError("Workspace storage directory escaped its root.")
         directory_stat = directory.stat(follow_symlinks=False)
@@ -269,7 +322,7 @@ class XFSWorkspaceStorage:
                 )
         try:
             self.owner_setter(directory, 10001, 10001)
-            directory.chmod(0o700)
+            directory.chmod(self.directory_mode)
         except OSError as exc:
             raise WorkspaceStorageError(
                 "Unable to assign workspace directory ownership to the unprivileged runtime user."
@@ -330,6 +383,7 @@ class XFSWorkspaceStorage:
             raise WorkspaceStorageError("Staging directory already exists or is unsafe.")
         if project_id != self._project_id(workspace_id):
             raise WorkspaceStorageError("Staging project ID does not match the workspace.")
+        self._migrate_legacy_registry()
         if not self.registry.exists():
             unexpected_entries = [
                 entry
@@ -366,6 +420,7 @@ class XFSWorkspaceStorage:
     def delete_workspace(self, workspace_id: str) -> None:
         _, directory = self._workspace_path(workspace_id)
         self.validate_backend()
+        self._migrate_legacy_registry()
         if not self.registry.exists():
             if directory.exists() or directory.is_symlink():
                 raise WorkspaceStorageError(
