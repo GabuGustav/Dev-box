@@ -81,6 +81,9 @@ services:
       LIFECYCLE_RECONCILE_INTERVAL_SECONDS: ${LIFECYCLE_RECONCILE_INTERVAL_SECONDS:-60}
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    networks:
+      - default
+      - api_proxy
     depends_on:
       db:
         condition: service_healthy
@@ -97,3 +100,6 @@ networks:
     internal: true
   egress_public:
     name: devbox_egress_public
+  api_proxy:
+    name: devbox_api_proxy
+    internal: true
