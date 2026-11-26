@@ -253,12 +253,19 @@ def _container_identity_is_valid(container, workspace_id: str, expected_path: Pa
 
 
 def _workspace_result(workspace_id: str, container=None) -> dict:
-    _, storage_ref = names_for(workspace_id)
+    container_name, storage_ref = names_for(workspace_id)
+    labels = {}
+    mounts = []
+    if container is not None:
+        labels = container.attrs.get("Config", {}).get("Labels") or {}
+        mounts = container.attrs.get("Mounts", [])
     return {
         "workspace_id": workspace_id,
         "container_id": container.id if container else None,
+        "container_name": container.name if container else container_name,
         "storage_ref": storage_ref,
         "state": container.status if container else "absent",
+        "attrs": {"Config": {"Labels": labels}, "Mounts": mounts},
     }
 
 
