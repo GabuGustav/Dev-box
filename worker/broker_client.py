@@ -109,6 +109,9 @@ class BrokerClient:
     def ping(self) -> dict[str, Any]:
         return self._request("GET", "/health")
 
+    def validate_connection(self) -> dict[str, Any]:
+        return self._request("GET", "/internal/ready")
+
     def start_workspace(self, workspace_id: str) -> BrokerContainer:
         payload = self._request("POST", f"/internal/workspaces/{workspace_id}/start")
         return BrokerContainer(self, workspace_id, payload)
