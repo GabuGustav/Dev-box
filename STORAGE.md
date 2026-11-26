@@ -2,7 +2,7 @@
 
 ## Decision
 
-Workspace data uses **one directory tree per workspace on a dedicated Linux XFS filesystem with project quotas enabled**. The worker uses xfs_quota to assign a project ID and enforce both a hard block limit and a hard inode limit.
+Workspace data uses **one directory tree per workspace on a dedicated Linux XFS filesystem with project quotas enabled**. The privileged broker uses `xfs_quota` to assign a project ID and enforce both a hard block limit and a hard inode limit. The worker uses a remote storage adapter and never runs XFS administration commands.
 
 This is the selected production backend. The ordinary Docker local named-volume driver is not used for workspace data because it does not provide a portable hard per-volume quota.
 
@@ -11,9 +11,9 @@ This is the selected production backend. The ordinary Docker local named-volume 
 - Linux host with one dedicated XFS filesystem for workspace data and a second dedicated XFS filesystem for encrypted snapshots.
 - The filesystem mounted with prjquota (or pquota).
 - Project quota accounting and enforcement both enabled.
-- xfsprogs and findmnt available in the worker image.
-- The host storage path mounted into the worker at the **same absolute path** used by the Docker daemon.
-- The worker runs as a trusted privileged service with CAP_SYS_ADMIN and access to the Docker socket.
+- xfsprogs and findmnt available in the privileged broker image.
+- The host storage paths mounted into the broker at the **same absolute paths** used by the Docker daemon; the worker also receives those paths for file I/O only.
+- The broker runs as a trusted privileged service with `CAP_SYS_ADMIN` and access to the Docker socket. The worker runs as UID/GID `10002:10001`, with all capabilities dropped and a read-only root filesystem.
 
 Do not place workspace data on the root filesystem or a directory shared with unrelated host data. Do not format a disk containing data. Provision and mount a dedicated data device using the host operating system's documented XFS procedure.
 
@@ -50,7 +50,7 @@ SNAPSHOT_ENCRYPTION_KEY=<32-byte-url-safe-base64-key>
 
 Generate the encryption key once with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Store it in a secret manager or protected deployment environment, and keep a secure backup separate from the snapshot filesystem. Losing this key makes the snapshots permanently unrecoverable; changing it without re-encrypting existing snapshots has the same effect.
 
-Both host directories must exist and already be mounted. Compose bind-mounts them into the worker using the same absolute paths. The snapshot filesystem is separate so snapshot retention cannot consume the live workspace filesystem's capacity. If custom paths are selected, use those exact paths in .env.
+Both host directories must exist and already be mounted. Compose bind-mounts them into the broker and worker using the same absolute paths. Only the broker can change XFS project/quota state. The snapshot filesystem is separate so snapshot retention cannot consume the live workspace filesystem's capacity. If custom paths are selected, use those exact paths in .env.
 
 ## Provisioning contract
 
@@ -59,11 +59,11 @@ For each workspace:
 1. Validate the workspace ID and derive a stable storage directory name from its SHA-256 digest.
 2. Verify the storage root is itself a mountpoint, is XFS, and has project quota enforcement enabled. A directory merely located somewhere on an XFS filesystem is rejected.
 3. Allocate a deterministic 31-bit XFS project ID. A persistent SQLite registry enforces uniqueness and maps the workspace ID, project ID, and directory.
-4. Initialize the XFS project tree once with the xfs_quota project -s operation; record that initialization in the persistent registry.
+4. The broker initializes the XFS project tree once with the `xfs_quota project -s` operation; it records that initialization in its private persistent registry.
 5. Reapply bhard and ihard limits before each start/resume, without recursively walking an already initialized tree.
 6. Set the directory owner to UID/GID 10001, then bind-mount only that directory at /workspace.
 
-The registry is stored on the dedicated storage filesystem, outside individual workspace directories. It maps workspace IDs to project IDs and paths and records each directory's device/inode identity. Missing or replaced registered directories fail closed instead of being silently recreated; restore them from a snapshot. The registry is required state: if it is missing while other storage data exists, provisioning fails closed. Back it up together with the workspace filesystem. Do not manually delete or edit it.
+The broker-owned project registries are stored in the private `broker_state` volume, separate from the XFS mounts and inaccessible to the worker. They map workspace IDs to project IDs and paths and record each directory's device/inode identity. Missing or replaced registered directories fail closed instead of being silently recreated; restore them from a snapshot. The registries are required state and must be backed up together with the workspace/snapshot filesystems. Do not manually delete or edit them.
 
 The API's storage_ref is an opaque backend reference, not a Docker volume name or a credential.
 
@@ -87,7 +87,7 @@ Snapshots are stored on the separate XFS snapshot filesystem, in a separate per-
 
 Restore decrypts into a separate staging directory assigned the same XFS project ID as the workspace. During the operation, the worker temporarily raises that project's block and inode limits to three times their configured values so the old and staged trees can coexist. It validates every archive path, rejects absolute paths, parent traversal, special files, hard links, and escaping symlinks, verifies the AES-GCM authentication tag, swaps the restored tree into place, deletes the old tree, and reapplies the normal limits. The host filesystem must have enough free space for both trees; the temporary quota increase does not create physical capacity. An interrupted directory swap is reconciled on the next start/resume request, which also reapplies the normal quota.
 
-The snapshot filesystem's `.devbox-storage.sqlite3` project registry, `.devbox-snapshots.sqlite3` metadata registry, and encrypted files must be backed up together. Keep the encryption key separately. Preserve the workspace filesystem's `.devbox-storage.sqlite3` registry with its workspace directories as well. Snapshots protect confidentiality at rest but do not guarantee that repository files contain no credentials: any credentials already written inside the workspace will be included in its encrypted snapshot. The worker necessarily handles plaintext while creating/restoring archives; its host and snapshot mount must be trusted.
+The broker's `broker_state` volume contains the XFS project registries. The `worker_state` volume contains the snapshot metadata database at `/var/lib/devbox-worker/snapshots.sqlite3`. Back up both named volumes together with the workspace and snapshot filesystems. On upgrade, the broker grants read-only group access to a legacy `.devbox-snapshots.sqlite3` file so the worker can migrate it into `worker_state`; the legacy file is retained until an operator verifies the migration and backup. Keep the encryption key separately. Snapshots protect confidentiality at rest but do not guarantee that repository files contain no credentials: any credentials already written inside the workspace will be included in its encrypted snapshot. The worker necessarily handles plaintext while creating/restoring archives; its host and snapshot mount must be trusted.
 
 ## Limits and boundaries
 
@@ -107,11 +107,11 @@ Do not call this container-level isolation a VM boundary. For hostile multi-tena
 
 ## Recovery and integration verification
 
-The worker service is configured to restart unless explicitly stopped. Workspace containers are independently managed by Docker and use a deterministic name plus a restart policy. A periodic worker reconciliation loop (60 seconds by default) scans managed containers, verifies their labels, deterministic names, assigned XFS directory, and /workspace bind mount, and stops running containers whose storage no longer matches. It also recovers interrupted snapshot directory swaps before validating mounts. It never auto-starts or deletes containers.
+The worker service is configured to restart unless explicitly stopped and runs as UID/GID `10002:10001` with all capabilities dropped and a read-only root filesystem. Workspace containers are independently managed by Docker and use a deterministic name plus a restart policy. A periodic worker reconciliation loop (60 seconds by default) scans managed containers, verifies their labels, deterministic names, assigned XFS directory, and /workspace bind mount, and stops running containers whose storage no longer matches. It also recovers interrupted snapshot directory swaps before validating mounts. It never auto-starts or deletes containers.
 
 The API runs a separate periodic lifecycle reconciler (60 seconds by default) for workspaces recorded as running, paused, or recovering. It queries the authenticated executor status endpoint, validates the workspace identity and storage binding, and synchronizes PostgreSQL state with the observed container state. Changes are written to the audit log. The API reconciler uses a row lock and compares the state observed before the network request so a delayed poll cannot overwrite a newer user-initiated lifecycle operation. If the executor is unavailable or rejects the request, the API leaves the database state unchanged. This control-plane reconciler is separate from the worker's host safety loop.
 
-The worker serializes lifecycle, snapshot, deletion, and reconciliation operations with an in-process lock per workspace. The Compose worker runs one Uvicorn process. Do not scale the worker to multiple processes or replicas until these locks are replaced with a shared distributed lock.
+The worker serializes lifecycle, snapshot, deletion, and reconciliation operations with an in-process lock per workspace. The broker performs snapshot restore directory swaps and recovery because the worker cannot write to the XFS mount root. The Compose worker runs one Uvicorn process. Do not scale the worker to multiple processes or replicas until these locks are replaced with a shared distributed lock.
 
 Optional integration tests:
 
@@ -138,7 +138,7 @@ These tests are opt-in because they modify filesystem quota state and create Doc
 
 The current worker requires Docker socket access and `CAP_SYS_ADMIN` to manage containers and XFS project quotas. This is a host-privileged trust boundary: compromise of the worker may compromise the host and every workspace. Keep this service private and tightly controlled until the planned narrow host broker is implemented and independently tested.
 
-The broker must accept only workspace-scoped typed operations and derive storage paths/project IDs from trusted registry state. It must not accept arbitrary host paths, arbitrary Docker API payloads, or shell commands. This is a remediation target; it is not implemented by this document update.
+The broker accepts workspace-scoped typed operations and derives storage paths/project IDs from trusted registry state. It must not accept arbitrary host paths, arbitrary Docker API payloads, or shell commands. Broker XFS operations and rootless worker changes are implemented on `phase-2-xfs-quota-broker`; the latest changes await CI verification.
 
 Real XFS/Docker integration, adversarial snapshot archive tests, interrupted-restore drills, and registry/key recovery exercises remain required. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
 
