@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening", "phase-2-privileged-broker"]
+    branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening", "phase-2-privileged-broker", "phase-2-rootless-worker-hardening"]
   pull_request:
     branches: ["main", "phase-1-core-platform", "phase-2-isolated-workspaces", "phase-2-security-hardening", "phase-2-privileged-broker"]
 
