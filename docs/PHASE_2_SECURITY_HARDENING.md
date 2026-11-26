@@ -12,10 +12,10 @@
 1. PostgreSQL was published on host port 5432 with static `devbox/devbox` credentials. **Remediated:** PostgreSQL is internal-only and Compose requires deployment-specific `DB_PASSWORD`.
 2. The API was published on host port 8000 over direct HTTP. **Remediated by default:** API binds to host loopback; external deployments still require TLS termination at a trusted reverse proxy.
 3. The worker mounted the Docker socket and received `CAP_SYS_ADMIN`. **Remediated by broker migration:** the broker alone owns Docker socket and XFS authority. The current branch further separates worker UID/GID from workspace runtime and prevents worker writes to XFS mount roots.
-4. Workspace containers have meaningful hardening (non-root UID, dropped capabilities, read-only root, no-new-privileges, private PID/IPC, resource limits, and no network by default), but explicit runtime-profile and tenant-boundary adversarial verification remains incomplete.
-5. Egress proxy protections exist, but DNS rebinding, IPv4/IPv6 private-address bypass, and proxy bypass require adversarial tests.
-6. Per-workspace operation locks are in-process only; multiple worker processes/replicas are not safe without distributed coordination.
-7. Snapshot code has encryption and archive validation controls, but malicious archive tests, interrupted restore tests, and real recovery drills remain incomplete.
+4. Workspace containers have non-root execution, dropped capabilities, read-only roots, no-new-privileges, private PID/IPC, resource limits, and no network by default. Docker's default seccomp and AppArmor profiles are now asserted by Linux integration tests when the host supports them; hostile tenant-boundary verification remains incomplete.
+5. The egress proxy now blocks additional IPv4/IPv6 translation ranges and has a DNS-to-private integration test. Runtime verification is pending on the current branch.
+6. Workspace operations remain process-local, but advisory file locks now enforce one broker and one worker per deployment; both Uvicorn services are pinned to one process. Multi-replica support remains unsupported.
+7. Snapshot review found a symlink-parent chain that could create an escaping symlink in the restore stage. Extraction now rejects archive entries nested beneath another symlink, with a regression test. More restore fault injection and fuzz coverage remain incomplete.
 8. Dedicated Linux XFS/Docker integration exists and passed its five-test baseline. The current rootless-worker changes need a fresh run on the branch.
 
 These findings distinguish confirmed unsafe defaults from risks that still require exploitability testing. No host escape or snapshot extraction exploit has been demonstrated by source review alone.
@@ -37,7 +37,7 @@ Detailed plans: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md) an
 - [x] 2.2.2 Add a private broker, separate service token, fixed Docker operations, and workspace-scoped XFS RPC.
 - [x] 2.2.3 Move XFS mount/project/quota administration behind broker; worker no longer has `CAP_SYS_ADMIN`.
 - [x] 2.2.4 Move Docker lifecycle, image builds, Git helper containers, and reconciliation behind broker; worker no longer mounts Docker socket or imports Docker SDK.
-- [ ] 2.2.5 Complete hostile Git configuration, timeout/output, and arbitrary helper capability tests.
+- [x] 2.2.5 Complete Git helper local-config guardrails, HTTPS-only transport, proxy enforcement, and malicious fsmonitor/file-transport regression tests (current-branch CI pending).
 - [x] 2.2.6 Implement and verify dedicated worker UID/GID `10002:10001`, all-capability drop, `no-new-privileges`, read-only root, isolated worker state, non-writable XFS mount roots, and broker-owned restore swaps (CI run 45870278489 passed).
 - [x] 2.2.7 Complete current-branch CI and release documentation.
 - [ ] Complete adversarial Git/archive/egress/cross-workspace/concurrency tests.
@@ -47,29 +47,34 @@ Detailed plans: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md) an
 **Remaining trust boundary:** the worker still has group-based read/write access to all workspace and snapshot directories on shared XFS mounts. This is not hostile-tenant isolation.
 
 ### 2.3 — Workspace runtime isolation
-- [ ] Pin explicit seccomp and AppArmor/SELinux policy where supported; retain safe runtime defaults.
-- [ ] Evaluate Docker user namespaces/idmapped mounts and per-workspace host identity separation.
-- [ ] Add adversarial cross-workspace filesystem/process/device/mount tests.
+
+Detailed implementation and status: [Phase 2.3 Adversarial Hardening](PHASE_2_3_ADVERSARIAL_HARDENING.md).
+- [x] Verify Docker's default seccomp profile and `docker-default` AppArmor when host support is reported; reject unconfined container settings.
+- [x] Record the userns-remap/subordinate-ID and XFS bind-mount ownership constraints; defer enabling remapping until a tested mapping design exists.
+- [ ] Extend cross-workspace filesystem/process/device/mount tests beyond the existing filesystem and PID isolation suite.
 - [ ] Evaluate microVMs against XFS quota requirements and document the trade-offs.
 
 ### 2.4 — Snapshot and storage verification
-- [ ] Add malicious archive tests: traversal, absolute paths, duplicate names, symlink chains, hard links, special files, and oversized archives.
-- [ ] Add interrupted create/restore/delete and recovery-state tests.
+- [x] Add malicious archive regression tests for normalized duplicates, file-parent collisions, symlink-parent chains, hard links, devices, and FIFOs.
+- [ ] Extend malicious archive tests to truncated/PAX metadata, expanded-size/entry-count boundaries, and property-based fuzzing.
+- [ ] Add interrupted create/restore/delete and recovery-state fault injection.
 - [ ] Test concurrent restore/delete and workspace lifecycle interactions.
-- [x] Run real XFS quota and Docker persistence/isolation tests on dedicated Linux infrastructure (five integration tests passed in run 45864319247).
+- [x] Run real XFS quota and Docker persistence/isolation tests on dedicated Linux infrastructure (seven integration tests passed in run 45870278489).
 - [ ] Document and rehearse backup/restore, registry recovery, and encryption-key recovery.
 
 ### 2.5 — Network and concurrency controls
-- [ ] Test proxy bypass, DNS rebinding, redirects, IPv4/IPv6 private/link-local/loopback destinations, and metadata endpoints.
-- [ ] Harden proxy destination resolution and connection-time IP validation where tests expose gaps.
+- [x] Expand Squid destination blocks for NAT64, local-use NAT64, 6to4, Teredo/IETF protocol, documentation, discard-only, and other special ranges.
+- [x] Add a proxy integration test with an allowlisted hostname resolving to private IPv4/IPv6; also probe unapproved domains and unsafe CONNECT ports.
+- [ ] Add dynamic DNS-rebinding/redirect tests and verify metadata endpoints across supported deployment networks.
 - [ ] Add tests for worker crash, simultaneous lifecycle/snapshot/delete calls, and stale reconciliation.
-- [ ] Replace process-local locks before enabling multiple worker processes or replicas; otherwise enforce a single-process deployment invariant.
+- [x] Enforce one broker and one worker per deployment using persistent-volume advisory locks and one Uvicorn worker; multi-replica deployment remains unsupported.
 
 ### 2.6 — CI, documentation, and release gate
 - [ ] Add security-focused CI jobs for static/config checks and adversarial unit tests.
 - [x] Add Linux Docker/XFS integration workflow with disposable loopback XFS filesystems.
 - [x] Make CI report integration tests as passed and report remaining skips with explicit reasons.
 - [x] Update security, architecture, storage, deployment, and roadmap documents for the broker/rootless-worker design.
+- [x] Update security, architecture, storage, deployment, and roadmap documents for Phase 2.3 controls.
 - [ ] Run and inspect the complete current-branch test/lint/build suite.
 
 ## Execution rules
