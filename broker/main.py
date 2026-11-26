@@ -6,6 +6,7 @@ import hmac
 import logging
 import os
 import re
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -32,6 +33,9 @@ SNAPSHOT_STORAGE_ROOT = Path(
 )
 BROKER_STATE_ROOT = Path(
     os.getenv("DEVBOX_BROKER_STATE_ROOT", "/var/lib/devbox-broker")
+)
+WORKER_STATE_ROOT = Path(
+    os.getenv("DEVBOX_WORKER_STATE_ROOT", "/var/lib/devbox-worker")
 )
 WORKSPACE_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
 SNAPSHOT_QUOTA = os.getenv("DEVBOX_SNAPSHOT_DISK_QUOTA", "20g")
@@ -647,11 +651,46 @@ async def reconciliation_loop() -> None:
         await asyncio.sleep(max(5, int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))))
 
 
+def prepare_worker_state() -> None:
+    if WORKER_STATE_ROOT.is_symlink():
+        raise RuntimeError("Worker state root must not be a symbolic link.")
+    WORKER_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    if not WORKER_STATE_ROOT.is_dir():
+        raise RuntimeError("Worker state root must be a directory.")
+    os.chown(WORKER_STATE_ROOT, 10002, 10001)
+    WORKER_STATE_ROOT.chmod(0o700)
+    for entry in WORKER_STATE_ROOT.iterdir():
+        if entry.is_symlink() or not entry.is_file() or entry.name not in {
+            "snapshots.sqlite3", "snapshots.sqlite3.migrating"
+        }:
+            raise RuntimeError("Worker state contains an unexpected entry.")
+        os.chown(entry, 10002, 10001)
+        entry.chmod(0o600)
+
+
+def prepare_shared_storage_permissions(storage: XFSWorkspaceStorage) -> None:
+    root = storage.root
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError("Configured XFS storage root is missing or unsafe.")
+    # validate_backend has already assigned root:10001 ownership and mode 2750.
+    if root.stat().st_uid != 0 or root.stat().st_gid != 10001:
+        raise RuntimeError("XFS storage root does not have broker-owned group permissions.")
+    root.chmod(0o2750)
+    legacy_metadata = root / ".devbox-snapshots.sqlite3"
+    if legacy_metadata.exists() or legacy_metadata.is_symlink():
+        if legacy_metadata.is_symlink() or not legacy_metadata.is_file():
+            raise RuntimeError("Legacy snapshot metadata registry is unsafe.")
+        os.chown(legacy_metadata, 0, 10001)
+        legacy_metadata.chmod(0o640)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_service_token()
     for storage in storage_backends.values():
         storage.validate_backend()
+        prepare_shared_storage_permissions(storage)
+    prepare_worker_state()
     ensure_image()
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
