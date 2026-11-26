@@ -54,9 +54,6 @@ services:
       DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
     cap_add:
       - SYS_ADMIN
-    networks:
-      - default
-      - broker_internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
@@ -98,6 +95,9 @@ services:
       DEVBOX_GIT_OPERATION_TIMEOUT_SECONDS: ${GIT_OPERATION_TIMEOUT_SECONDS:-300}
     cap_add:
       - SYS_ADMIN
+    networks:
+      - default
+      - broker_internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
