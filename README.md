@@ -6,7 +6,7 @@ DevBox is a model-agnostic platform where AI agents can work with real repositor
 
 ## Current status
 
-**Phase 3 implementation exists, and Phase 2 security remediation is in progress on `phase-2-security-hardening`; the privileged broker migration is isolated on `phase-2-privileged-broker`. The broker service has been added, but the worker still retains its direct Docker socket and `CAP_SYS_ADMIN` until the migration is completed.** The remediation branch has passed CI for deployment-default changes (108 tests passed; five Linux XFS/Docker integration tests remain skipped pending dedicated infrastructure). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
+**Phase 3 implementation exists, and Phase 2 security remediation is in progress on `phase-2-security-hardening`; the privileged broker migration is isolated on `phase-2-privileged-broker`. The worker now delegates Docker lifecycle and Git helper execution to the private broker; its Docker socket and Docker SDK have been removed. The worker still retains `CAP_SYS_ADMIN` for XFS quota commands, which is the next migration step.** The broker migration has passed CI run 45864319247 (146 tests passed, five skipped, and all five Linux XFS/Docker integration tests passed). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
 
 ## Core principles
 
@@ -36,7 +36,7 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 - Python 3.12+
 - FastAPI and SQLAlchemy 2
 - PostgreSQL 16 and Alembic
-- Docker SDK in a separate trusted executor service
+- Docker SDK in a separate privileged broker; worker uses authenticated HTTP RPC
 - Pytest and Ruff
 - Docker Compose for local development
 
@@ -64,7 +64,7 @@ A repository can have multiple workspaces. The repository URL is a discovery key
    docker compose up --build
    ```
 
-   Compose starts PostgreSQL, the trusted executor supervisor, and the API. The API applies database migrations before serving requests. The executor builds the workspace base image on first startup.
+   Compose starts PostgreSQL, the privileged broker, the worker, and the API. The API applies database migrations before serving requests. The broker builds the workspace base image on first startup.
 
 6. Create a principal using the API container:
 
@@ -112,7 +112,7 @@ Workspace creation remains separate from provisioning. A workspace receives a st
 
 ## Isolation model and current limits
 
-The API does not mount the Docker socket. A separate trusted worker service controls Docker and is the only service with access to the host Docker socket. Workspace containers receive only their own dedicated bind-mounted directory on the XFS workspace filesystem. The worker also receives `CAP_SYS_ADMIN` to manage XFS project quotas; this makes it a highly privileged component.
+The API does not mount the Docker socket. A separate privileged broker controls Docker and is the only service with access to the host Docker socket. The worker communicates with it over a private authenticated network. Workspace containers receive only their own dedicated bind-mounted directory on the XFS workspace filesystem. The worker still receives `CAP_SYS_ADMIN` to manage XFS project quotas; that capability will be removed when quota operations move behind the broker.
 
 Workspace containers currently use:
 - A dedicated container and directory-tree project quota per workspace.
@@ -122,7 +122,7 @@ Workspace containers currently use:
 - No network interface (`network_mode=none`) by default.
 - Bounded writable tmpfs mounts for temporary runtime files.
 
-This is container-level isolation, not a VM boundary. The worker supervisor is highly privileged and must remain a trusted internal service. Never expose its port publicly or mount the Docker socket into workspace containers.
+This is container-level isolation, not a VM boundary. The broker is host-privileged and must remain a trusted internal service. The worker remains trusted for cross-workspace storage access until storage operations are scoped per workspace. Never expose broker or worker ports publicly, and never mount the Docker socket into workspace containers.
 
 **Storage requirements:** the worker refuses to provision a workspace unless the configured storage root is on XFS with project quota accounting and enforcement enabled. The worker uses `xfs_quota` to assign a unique project ID, a hard block limit, and a hard inode limit before mounting the directory into a workspace container. A SQLite registry prevents two workspaces from accidentally sharing a project ID. The workspace storage root must be mounted into the worker at the same absolute path used by the Docker daemon. Docker Desktop and non-XFS local filesystems are not supported for actual workspace provisioning; use them for API/unit-test development only.
 
