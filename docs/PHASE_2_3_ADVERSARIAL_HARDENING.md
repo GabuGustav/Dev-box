@@ -5,7 +5,7 @@
 **Base commit:** `2257a94e872266294400350233196ced562e4a43`  
 **Inherited verification:** CI run [45870278489](https://github.com/GabuGustav/Dev-box/actions/runs/45870278489) — 174 passed, 7 skipped, 71% coverage; all 7 Linux XFS/Docker integration tests passed. The base branch received documentation-only commits after the tested code commit.
 
-**Status:** Core hardening changes, adversarial archive tests, targeted restore fault injection, and runtime integration tests are implemented. CI run [45874767681](https://github.com/GabuGustav/Dev-box/actions/runs/45874767681) passed the real Linux XFS/Docker integration job, but the quality job stopped at Ruff before unit tests. The two reported E501 violations and the CI import-lint auto-fix behavior have been corrected; rerun verification is pending. Property-based fuzzing and broader concurrency fault injection remain open.
+**Status:** Core hardening changes, adversarial archive tests, targeted restore fault injection, and runtime integration tests are implemented. CI run [45874767681](https://github.com/GabuGustav/Dev-box/actions/runs/45874767681) passed the real Linux XFS/Docker integration job and all image/Compose builds; Ruff blocked unit tests on two E501 violations. The lint corrections passed in [run 45906814016](https://github.com/GabuGustav/Dev-box/actions/runs/45906814016), as did all image/Compose and Linux XFS/Docker checks. Its unit suite then reported 198 passed, 8 skipped, and 3 failures: one stale lock-message expectation, one missing explicit Git-helper privilege default, and a restore-cleanup test whose injected failure persisted into recovery. The Git helper now explicitly sets `privileged=False` and `devices=[]`; the two test assumptions have been corrected. Verification of these latest corrections is pending. Property-based fuzzing and broader concurrency fault injection remain open.
 
 ## Objective
 
@@ -84,7 +84,7 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Keep multi-replica deployments explicitly unsupported until distributed locking is implemented.
 
 ### 2.3.6 — CI, documentation, and exit gate
-- [ ] Run Ruff, unit tests, Compose validation, all image builds, and Linux Docker/XFS/proxy integration (run 45874767681: all four image builds, Compose validation, and Linux XFS/Docker integration passed; quality stopped at two E501 lint errors before unit tests; corrections committed, rerun pending).
+- [ ] Run Ruff, unit tests, Compose validation, all image builds, and Linux Docker/XFS/proxy integration (run 45906814016: Ruff, all four image builds, Compose validation, and Linux XFS/Docker integration passed; unit tests reported 198 passed, 8 skipped, 3 failures; fixes committed, rerun pending).
 - [ ] Ensure CI reports all test counts, skips, and integration results.
 - [x] Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and this plan.
 - [x] Record remaining risks accurately; do not claim hostile-tenant isolation.
@@ -114,4 +114,5 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Container profile assertions added; cross-workspace integration coverage retained.
 - [x] Single-instance locks and lock-registry cleanup implemented.
 - [ ] Full CI verification and remaining restore fault-injection coverage.
-- [x] Fix run 45874767681 Ruff failures: wrap the two overlong test lines, normalize import spacing, and replace mutating import auto-fix in CI with non-mutating repository-wide Ruff checks; rerun pending.
+- [x] Fix run 45874767681 Ruff failures: wrap the two overlong test lines, normalize import spacing, and replace mutating import auto-fix in CI with non-mutating repository-wide Ruff checks.
+- [x] Address run 45906814016 unit-test findings: explicitly disable privilege and devices for Git helper containers, align the lock-path test with the implementation's precise error, and make the restore cleanup fault injection fail once so the recovery retry can be exercised; verification pending.
