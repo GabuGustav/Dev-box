@@ -95,3 +95,12 @@ def test_broker_client_rejects_missing_or_placeholder_tokens():
         base_url="http://broker:9100",
         token="x" * 48,
     ).validate_config()
+
+def test_broker_client_preserves_gateway_timeout():
+    client = make_client(
+        lambda request: httpx.Response(504, json={"detail": "Git operation timed out"})
+    )
+    with pytest.raises(BrokerRejected) as error:
+        client.run_git_helper("dbx_abcdefghijklmnopqrstuv", ["status", "--short", "--branch"])
+    assert error.value.status_code == 504
+    client.close()
