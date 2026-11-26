@@ -5,7 +5,7 @@
 **Base commit:** `2257a94e872266294400350233196ced562e4a43`  
 **Inherited verification:** CI run [45870278489](https://github.com/GabuGustav/Dev-box/actions/runs/45870278489) — 174 passed, 7 skipped, 71% coverage; all 7 Linux XFS/Docker integration tests passed. The base branch received documentation-only commits after the tested code commit.
 
-**Status:** Core hardening changes and regression tests implemented; Linux CI verification is pending. Snapshot fault-injection/fuzz coverage remains open.
+**Status:** Core hardening changes, adversarial archive tests, targeted restore fault injection, and runtime integration tests are implemented; Linux CI verification is pending. Property-based fuzzing and broader concurrency fault injection remain open.
 
 ## Objective
 
@@ -67,12 +67,12 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 - [x] Expand blocked destinations to include IPv4 special-purpose ranges and IPv6 NAT64, local-use NAT64, IPv4-compatible/mapped, 6to4, Teredo/IETF protocol, documentation, discard-only, and other non-global ranges.
 - [x] Add static checks for private/special destination ranges and a Linux proxy integration test with an allowlisted hostname resolving to private IPv4/IPv6.
 - [x] Test unapproved domains and unsafe CONNECT ports in the proxy integration probe.
-- [ ] Verify workspace containers and the worker cannot join/use the internal egress network directly.
+- [x] Verify the broker, worker, and API are not attached to the internal egress network; workspace containers use `network_mode=none`, and only the proxy is attached to the egress network.
 
 ### 2.3.4 — Container runtime and cross-workspace verification
 - [x] Assert workspace HostConfig is non-privileged, has no devices, and does not request unconfined seccomp/AppArmor.
 - [x] Verify the host reports seccomp and verify `docker-default` AppArmor when the host reports AppArmor support.
-- [ ] Extend cross-workspace tests for bind-mount scope and symlink/relative-path escape attempts; existing PID/filesystem isolation tests remain enabled.
+- [x] Extend cross-workspace tests with a sibling-workspace symlink read attempt; existing PID/filesystem isolation tests remain enabled.
 - [x] Record the userns-remap/subordinate-ID and XFS ownership incompatibility; defer enabling user namespaces until an explicit storage mapping design is tested.
 
 ### 2.3.5 — Concurrency and single-instance enforcement
@@ -109,7 +109,7 @@ The broker and worker share persistent state volumes. Advisory file locks on tho
 
 ### Implementation
 - [x] Git helper hardening and malicious-configuration regression tests added.
-- [x] Snapshot symlink-parent protection and baseline adversarial archive tests added; fault injection/fuzzing remain.
+- [x] Snapshot symlink-parent protection, archive size/count/truncation/PAX tests, and targeted restore fault injection added; property-based fuzzing remains.
 - [x] Proxy address-range expansion and DNS-to-private integration test added.
 - [x] Container profile assertions added; cross-workspace integration coverage retained.
 - [x] Single-instance locks and lock-registry cleanup implemented.
