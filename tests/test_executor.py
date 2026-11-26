@@ -130,6 +130,8 @@ class FakeStorage:
 
     def ensure_workspace(self, workspace_id):
         self.ensured.append(workspace_id)
+        if self.validation_error:
+            raise self.validation_error
         return self.path
 
     def validate_backend(self):
@@ -300,7 +302,7 @@ def test_reconciliation_recovers_snapshot_transactions(monkeypatch, tmp_path):
 
     assert recovered == 1
     assert snapshots.recovered == [workspace_id]
-    assert storage.validated == [True]
+    assert storage.ensured == [workspace_id]
 
 
 def test_reconciliation_stops_workspace_when_storage_is_unavailable(monkeypatch, tmp_path):
