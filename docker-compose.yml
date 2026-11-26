@@ -67,6 +67,19 @@ services:
 
   worker:
     restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    nano_cpus: 1000000000
+    init: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /run:rw,noexec,nosuid,size=16m
     depends_on:
       egress-proxy:
         condition: service_started
@@ -76,6 +89,8 @@ services:
       context: .
       dockerfile: worker.Dockerfile
     environment:
+      HOME: /tmp
+      TMPDIR: /tmp
       DEVBOX_EXECUTOR_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
       DEVBOX_BROKER_URL: http://broker:9100
       DEVBOX_BROKER_TOKEN: ${BROKER_SERVICE_TOKEN:?Set BROKER_SERVICE_TOKEN in .env}
