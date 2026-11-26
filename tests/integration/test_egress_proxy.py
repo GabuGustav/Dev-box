@@ -5,7 +5,6 @@ from uuid import uuid4
 import docker
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.skipif(
     os.getenv("DEVBOX_RUN_DOCKER_INTEGRATION") != "1",
