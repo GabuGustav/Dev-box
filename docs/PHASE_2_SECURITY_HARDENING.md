@@ -2,7 +2,7 @@
 
 **Branch:** `phase-2-security-hardening`  
 **Base:** `phase-2-isolated-workspaces` (branch ref at branch creation)  
-**Status:** Investigation complete; remediation not yet verified  
+**Status:** Deployment hardening and broker migration implemented; rootless-worker verification in progress on `phase-2-xfs-quota-broker`  
 **Scope:** Close deployment-default exposure, reduce privileged-worker blast radius, validate container and storage isolation, and make security checks repeatable in CI.
 
 ## Baseline findings
@@ -32,14 +32,20 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 **Exit:** no public database listener by default; no committed production credentials; secure deployment requirements are executable and documented.
 
 ### 2.2 — Privileged worker boundary
-Detailed implementation plan: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md). Work is isolated on branch `phase-2-privileged-broker`.
-- [x] 2.2.1 Map every operation requiring Docker API access and XFS administration.
-- [ ] 2.2.2 Design a narrow privileged host broker for the minimum Docker/XFS operations, with typed requests, strict workspace/path validation, and no arbitrary Docker API passthrough.
-- [ ] 2.2.3 Separate unprivileged worker orchestration from the privileged broker.
-- [ ] 2.2.4 Authenticate broker calls, restrict its network reachability, and add audit logging.
-- [ ] 2.2.5 Add negative tests proving the broker cannot be used for arbitrary container creation, host path access, or cross-workspace operations.
 
-**Exit:** general worker process no longer has direct Docker socket access or `CAP_SYS_ADMIN`; broker API is narrowly scoped and tested. Do not implement until the broker contract and operational failure modes are reviewed.
+Detailed implementation plans: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md) and [Phase 2.2.3 Rootless Worker](PHASE_2_2_3_ROOTLESS_WORKER.md). Work is based on the latest successful broker branch and continues on `phase-2-xfs-quota-broker`.
+
+- [x] 2.2.1 Inventory Docker and XFS operations and define the typed broker contract.
+- [x] 2.2.2 Add a private broker service, separate bearer token, fixed Docker operations, and workspace-scoped XFS quota RPC. Broker request-size limits and security audit events remain follow-up items.
+- [x] 2.2.3 Move `findmnt`, XFS project registry, and `xfs_quota` operations behind broker methods; the worker has no `CAP_SYS_ADMIN`.
+- [x] 2.2.4 Move Docker lifecycle, image build, Git helper containers, and reconciliation behind the broker; the worker has no Docker socket or Docker SDK.
+- [ ] 2.2.5 Complete hostile Git configuration, timeout/output, and arbitrary helper capability tests.
+- [x] 2.2.6 Implement worker UID/GID `10002:10001`, all-capability drop, `no-new-privileges`, read-only root, separate worker state, and broker-owned restore swaps. CI verification of the latest rootless changes is pending.
+- [ ] 2.2.7 Complete current-branch CI and Linux XFS/Docker verification, then close documentation and release gates.
+
+**Verified parent evidence:** CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed both quality and Linux XFS/Docker integration jobs (146 unit tests passed, five skipped in quality, all five integration tests passed). This verifies the Docker/XFS broker migration, not the subsequent rootless-worker commits.
+
+**Remaining trust boundary:** worker and workspace files are still on shared XFS mounts. The worker's group `10001` grants access to all workspace and snapshot trees. A compromised worker can still read/write multiple tenants' data. The broker reduces host privilege but does not make the current design safe for hostile multi-tenancy.
 
 ### 2.3 — Workspace runtime isolation
 - [ ] 2.3.1 Select and pin explicit seccomp and AppArmor/SELinux policy where supported; retain safe runtime defaults.
@@ -89,8 +95,8 @@ Detailed implementation plan: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED
 - [x] Inspected Compose deployment topology, API authentication/ownership, worker Docker/XFS privileges, workspace container settings, snapshot/storage implementation, egress proxy, lifecycle locking, and CI workflow.
 - [x] Created this remediation branch from `phase-2-isolated-workspaces`.
 - [x] Confirm the remediation branch was created from the Phase 2 branch ref; exact base SHA is recorded in PR #1.
-- [ ] Re-verify a green CI run after the lint correction before treating Phase 2.1 as verified.
-- [x] Phase 2.1 implementation edits committed: Compose, environment template, production settings validation, tests, CI trigger/Compose validation, and deployment documentation. Test results are pending; do not treat Phase 2.1 as complete until Actions is green.
+- [x] Re-verify deployment hardening and baseline XFS/Docker CI (runs 45860830556 and 45864319247 passed).
+- [x] Phase 2.1 implementation and verification complete: Compose, environment template, production settings validation, tests, CI trigger/Compose validation, and deployment documentation.
 
 
 ## Privileged broker design constraints (research outcome)
@@ -141,3 +147,13 @@ This design reduces the worker's direct host-root capability; it does **not** by
 
 
 **Broker migration checkpoint:** CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed (146 passed, five skipped, 71% coverage; all five Linux XFS/Docker integration tests passed). Docker lifecycle and Git operations are brokered; XFS operations are the remaining privilege blocker.
+
+
+### Rootless worker implementation branch — `phase-2-xfs-quota-broker`
+
+- [x] Created a new branch from the latest successful `phase-2-privileged-broker` line.
+- [x] Added a dedicated worker-state volume, broker-owned mount-root permissions, group-based workspace directories, and snapshot metadata migration.
+- [x] Delegated restore directory swaps and recovery to typed broker methods.
+- [x] Configured the worker to run as UID/GID `10002:10001`, drop all capabilities, use a read-only root, and mount only bounded temporary/persistent writable state plus the workspace/snapshot data mounts.
+- [x] Added unit tests and updated implementation/security documentation.
+- [ ] Run and inspect CI on this branch; quality and Linux XFS/Docker integration must both pass before claiming this subphase complete.
