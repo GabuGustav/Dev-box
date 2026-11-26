@@ -75,7 +75,7 @@ services:
       - no-new-privileges:true
     pids_limit: 256
     mem_limit: 1g
-    nano_cpus: 1000000000
+    cpus: 1.0
     init: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
