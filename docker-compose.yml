@@ -154,6 +154,3 @@ networks:
   worker_api:
     name: devbox_worker_api
     internal: true
-  worker_api:
-    name: devbox_worker_api
-    internal: true
