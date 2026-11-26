@@ -89,7 +89,7 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
         fsmonitor_script = workspace_path / "fsmonitor.sh"
         fsmonitor_marker = workspace_path / "fsmonitor-executed"
         fsmonitor_script.write_text(
-            "#!/bin/sh\nprintf 'executed' > /workspace/fsmonitor-executed\n",
+            "#!/bin/sh\nprintf 'executed' > /workspace/fsmonitor-executed\ncat >/dev/null\nprintf 'token\\0'\n",
             encoding="utf-8",
         )
         fsmonitor_script.chmod(0o755)
