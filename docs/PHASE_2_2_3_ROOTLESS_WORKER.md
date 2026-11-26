@@ -3,7 +3,7 @@
 **Branch:** `phase-2-rootless-worker-hardening`  
 **Base commit:** `088364d3bffd7fb03bc9010bd1be9057824bffb1` on `phase-2-privileged-broker`  
 **Base CI:** [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) — passed.  
-**Status:** Runtime changes, tests, and documentation committed; branch CI verification pending.
+**Status:** Implemented and verified by CI run [45870278489](https://github.com/GabuGustav/Dev-box/actions/runs/45870278489): quality passed (174 tests passed, 7 skipped, 71% coverage), Ruff and all image/Compose checks passed, and all 7 Linux XFS/Docker integration tests passed.
 
 ## Objective
 
@@ -42,7 +42,7 @@ This is privilege reduction, not hostile-tenant isolation: the worker still has 
 - [x] Run the worker as UID/GID `10002:10001`; retain workspace runtime UID/GID `10001:10001`.
 - [x] Keep all Linux capabilities dropped, `no-new-privileges`, read-only root filesystem, resource limits, and private worker networks.
 - [x] Provide only bounded temporary filesystems and the dedicated worker-state volume as additional writable paths.
-- [ ] Verify Git, snapshots, deletion, and reconciliation with group access and without CAP_CHOWN in branch CI.
+- [x] Verify Git, snapshots, deletion, and reconciliation with group access and without CAP_CHOWN in branch CI.
 
 ### 2.2.3-D — Broker-owned restore transitions
 - [x] Add typed broker commit-restore and recover-restore endpoints.
@@ -53,7 +53,7 @@ This is privilege reduction, not hostile-tenant isolation: the worker still has 
 ### 2.2.3-E — Verification and documentation
 - [x] Add tests for rootless Compose identity, mount-root write denial, per-workspace group access, snapshot metadata migration, restore delegation, and recovery.
 - [x] Extend Linux XFS/Docker integration to create files as UID 10002/GID 10001, verify mount-root write denial, perform broker restore swaps, and confirm workspace UID 10001 can modify restored files.
-- [ ] Run Ruff, full unit tests, Compose validation, all image builds, and Linux XFS/Docker integration.
+- [x] Run Ruff, full unit tests, Compose validation, all image builds, and Linux XFS/Docker integration (run 45870278489).
 - [x] Update README, SECURITY, ARCHITECTURE, STORAGE, DEPLOYMENT, ROADMAP, and Phase 2.2 plans with verified results and remaining limitations.
 
 ## Security invariants
@@ -76,7 +76,7 @@ This is privilege reduction, not hostile-tenant isolation: the worker still has 
 - [x] Delegated restore commit/recovery and mount-root fsync to the broker.
 - [x] Configured worker UID/GID 10002:10001, all capabilities dropped, no-new-privileges, read-only root, and bounded writable tmpfs.
 - [x] Added unit and Linux integration coverage and updated implementation/security documentation.
-- [ ] Run and inspect branch CI; quality and Linux XFS/Docker integration must both pass.
+- [x] Run and inspect branch CI; quality and Linux XFS/Docker integration both passed in run 45870278489.
 
 ## References
 
