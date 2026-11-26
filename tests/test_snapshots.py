@@ -509,7 +509,9 @@ def test_snapshot_restore_rejects_file_as_parent_path(tmp_path, monkeypatch):
     assert not list(workspace.parent.glob(".*.restore-stage"))
 
 
-def prepare_restore_with_archive(tmp_path, monkeypatch, payload, *, max_bytes=None, max_entries=None):
+def prepare_restore_with_archive(
+    tmp_path, monkeypatch, payload, *, max_bytes=None, max_entries=None
+):
     store, workspace_storage = make_store(tmp_path)
     workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
     (workspace / "keep.txt").write_text("original", encoding="utf-8")
