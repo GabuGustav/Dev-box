@@ -750,13 +750,11 @@ def api_reconcile_git_helpers() -> dict:
 )
 def internal_ready() -> dict[str, str]:
     try:
-        for storage in storage_backends.values():
-            storage.validate_backend()
         docker_client.ping()
-    except (WorkspaceStorageError, DockerException) as exc:
+    except DockerException as exc:
         raise HTTPException(
             status_code=503,
-            detail="Broker dependencies are unavailable.",
+            detail="Broker Docker service is unavailable.",
         ) from exc
     return {"status": "ready"}
 
