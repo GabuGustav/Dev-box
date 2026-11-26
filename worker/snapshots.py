@@ -527,8 +527,17 @@ class SnapshotStore:
                         input_file = archive.extractfile(member)
                         if input_file is None:
                             raise SnapshotError("Snapshot file contents are unavailable.")
+                        copied = 0
                         with input_file, destination.open("xb") as output_file:
-                            shutil.copyfileobj(input_file, output_file, CHUNK_SIZE)
+                            while chunk := input_file.read(CHUNK_SIZE):
+                                copied += len(chunk)
+                                if copied > member.size:
+                                    raise SnapshotError(
+                                        "Snapshot archive member exceeds its declared size."
+                                    )
+                                output_file.write(chunk)
+                        if copied != member.size:
+                            raise SnapshotError("Snapshot archive member data is truncated.")
                         destination.chmod(0o770 if member.mode & 0o111 else 0o660)
             reader.verify()
 
