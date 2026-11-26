@@ -55,3 +55,8 @@ def test_worker_waits_for_broker_and_receives_distinct_token():
     assert worker["depends_on"]["broker"]["condition"] == "service_healthy"
     assert worker["environment"]["DEVBOX_BROKER_URL"] == "http://broker:9100"
     assert "BROKER_SERVICE_TOKEN" in worker["environment"]["DEVBOX_BROKER_TOKEN"]
+
+def test_worker_image_does_not_install_docker_sdk():
+    dockerfile = Path("worker.Dockerfile").read_text(encoding="utf-8")
+    assert "docker>=" not in dockerfile.lower()
+    assert "httpx>=" in dockerfile.lower()
