@@ -8,12 +8,15 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+
+from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.broker")
 
@@ -24,6 +27,16 @@ IMAGE_CONTEXT = os.getenv("DEVBOX_WORKSPACE_IMAGE_CONTEXT", "/opt/devbox/workspa
 WORKSPACE_STORAGE_ROOT = Path(
     os.getenv("DEVBOX_WORKSPACE_STORAGE_ROOT", "/srv/devbox/workspaces")
 )
+SNAPSHOT_STORAGE_ROOT = Path(
+    os.getenv("DEVBOX_SNAPSHOT_STORAGE_ROOT", "/srv/devbox/snapshots")
+)
+BROKER_STATE_ROOT = Path(
+    os.getenv("DEVBOX_BROKER_STATE_ROOT", "/var/lib/devbox-broker")
+)
+WORKSPACE_QUOTA = os.getenv("DEVBOX_WORKSPACE_QUOTA", "10g")
+SNAPSHOT_QUOTA = os.getenv("DEVBOX_SNAPSHOT_QUOTA", "20g")
+WORKSPACE_INODE_LIMIT = int(os.getenv("DEVBOX_WORKSPACE_INODE_LIMIT", "200000"))
+SNAPSHOT_INODE_LIMIT = int(os.getenv("DEVBOX_SNAPSHOT_INODE_LIMIT", "300000"))
 WORKSPACE_CPU = float(os.getenv("DEVBOX_WORKSPACE_CPU", "1.0"))
 WORKSPACE_MEMORY = os.getenv("DEVBOX_WORKSPACE_MEMORY", "1g")
 WORKSPACE_PIDS = int(os.getenv("DEVBOX_WORKSPACE_PIDS", "256"))
@@ -37,12 +50,33 @@ GIT_ALLOWED_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
 
 docker_client = docker.from_env(timeout=GIT_OPERATION_TIMEOUT_SECONDS + 30)
 
+storage_backends = {
+    "workspace": XFSWorkspaceStorage(
+        str(WORKSPACE_STORAGE_ROOT),
+        WORKSPACE_QUOTA,
+        WORKSPACE_INODE_LIMIT,
+        registry_path=BROKER_STATE_ROOT / "workspace-projects.sqlite3",
+    ),
+    "snapshot": XFSWorkspaceStorage(
+        str(SNAPSHOT_STORAGE_ROOT),
+        SNAPSHOT_QUOTA,
+        SNAPSHOT_INODE_LIMIT,
+        registry_path=BROKER_STATE_ROOT / "snapshot-projects.sqlite3",
+    ),
+}
+
 
 class GitHelperRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     arguments: list[str] = Field(min_length=1, max_length=110)
     network_enabled: bool = False
+
+
+class QuotaRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    multiplier: int = Field(ge=1, le=10)
 
 
 def validate_service_token() -> None:
@@ -612,6 +646,8 @@ async def reconciliation_loop() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_service_token()
+    for storage in storage_backends.values():
+        storage.validate_backend()
     ensure_image()
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
@@ -713,4 +749,13 @@ def api_reconcile_git_helpers() -> dict:
     dependencies=[Depends(require_service_token)],
 )
 def internal_ready() -> dict[str, str]:
+    try:
+        for storage in storage_backends.values():
+            storage.validate_backend()
+        docker_client.ping()
+    except (WorkspaceStorageError, DockerException) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Broker dependencies are unavailable.",
+        ) from exc
     return {"status": "ready"}
