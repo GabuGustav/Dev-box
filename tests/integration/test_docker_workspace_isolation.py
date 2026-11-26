@@ -68,6 +68,9 @@ def test_workspace_mount_is_private_and_survives_container_replacement():
         second_path = storage.ensure_workspace(second_id)
         created.append(second_id)
         (second_path / "private.txt").write_text("agent-b-secret", encoding="utf-8")
+        (first_path / "escape").symlink_to(
+            f"../{second_path.name}", target_is_directory=True
+        )
 
         output = run_workspace(
             client,
@@ -76,6 +79,18 @@ def test_workspace_mount_is_private_and_survives_container_replacement():
             "from pathlib import Path; "
             "p=Path('/workspace/private.txt'); "
             "raise SystemExit(1 if p.exists() else 0)",
+        )
+        assert output == b""
+
+        output = run_workspace(
+            client,
+            IMAGE,
+            first_path,
+            "from pathlib import Path; "
+            "p=Path('/workspace/escape/private.txt'); "
+            "assert not p.exists(); "
+            "exec(\"try:\\n p.read_text()\\n raise AssertionError('cross-workspace read succeeded')\\n"
+            "except OSError:\\n pass\")",
         )
         assert output == b""
 
