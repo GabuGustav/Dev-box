@@ -147,6 +147,8 @@ class SnapshotStore:
         self._migrate_legacy_registry()
 
     def _migrate_legacy_registry(self) -> None:
+        if self.registry.is_symlink():
+            raise SnapshotError("Snapshot metadata registry path is unsafe.")
         if self.registry == self.legacy_registry or self.registry.exists():
             if self.registry.is_symlink() or (self.registry.exists() and not self.registry.is_file()):
                 raise SnapshotError("Snapshot metadata registry path is unsafe.")
@@ -199,7 +201,8 @@ class SnapshotStore:
         if self.require_group_permissions:
             directory_stat = directory.stat(follow_symlinks=False)
             if (
-                directory_stat.st_gid != 10001
+                directory_stat.st_uid != 10001
+                or directory_stat.st_gid != 10001
                 or directory_stat.st_mode & 0o2070 != 0o2070
             ):
                 raise SnapshotError(
