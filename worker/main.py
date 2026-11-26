@@ -41,14 +41,14 @@ RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", 
 broker_client = BrokerClient()
 workspace_storage = RemoteWorkspaceStorage(
     WORKSPACE_STORAGE_ROOT,
-    WORKSPACE_QUOTA,
+    WORKSPACE_DISK_QUOTA,
     WORKSPACE_INODE_LIMIT,
     "workspace",
     broker_client,
 )
 snapshot_storage = RemoteWorkspaceStorage(
     SNAPSHOT_STORAGE_ROOT,
-    SNAPSHOT_QUOTA,
+    SNAPSHOT_DISK_QUOTA,
     SNAPSHOT_INODE_LIMIT,
     "snapshot",
     broker_client,
