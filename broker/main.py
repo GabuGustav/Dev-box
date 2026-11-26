@@ -17,6 +17,7 @@ from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from worker.instance_lock import acquire_file_lock
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
 logger = logging.getLogger("devbox.broker")
@@ -33,6 +34,9 @@ SNAPSHOT_STORAGE_ROOT = Path(
 )
 BROKER_STATE_ROOT = Path(
     os.getenv("DEVBOX_BROKER_STATE_ROOT", "/var/lib/devbox-broker")
+)
+BROKER_LOCK_PATH = Path(
+    os.getenv("DEVBOX_BROKER_LOCK_PATH", str(BROKER_STATE_ROOT / "broker.lock"))
 )
 WORKER_STATE_ROOT = Path(
     os.getenv("DEVBOX_WORKER_STATE_ROOT", "/var/lib/devbox-worker")
@@ -337,6 +341,8 @@ def start_workspace(workspace_id: str) -> dict:
             nano_cpus=int(WORKSPACE_CPU * 1_000_000_000),
             pids_limit=WORKSPACE_PIDS,
             read_only=True,
+            privileged=False,
+            devices=[],
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
             tmpfs={
@@ -500,15 +506,45 @@ def reconcile_orphaned_git_helpers() -> int:
 def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
     validate_git_arguments(request.arguments, request.network_enabled)
     path = workspace_path_for(workspace_id)
+    is_clone = request.arguments[0] == "clone"
+    if not is_clone:
+        git_directory = path / ".git"
+        if git_directory.is_symlink() or not git_directory.is_dir():
+            raise HTTPException(
+                status_code=409,
+                detail="Workspace Git metadata is missing or unsafe.",
+            )
     environment = {
         "HOME": "/tmp",
         "TMPDIR": "/tmp",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "SSH_ASKPASS": "/bin/false",
         "GIT_PAGER": "cat",
+        "GIT_ALLOW_PROTOCOL": "https",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
         "LC_ALL": "C.UTF-8",
     }
+    if not is_clone:
+        environment.update({"GIT_DIR": "/workspace/.git", "GIT_WORK_TREE": "/workspace"})
+    git_config = [
+        "-c", "core.hooksPath=/dev/null",
+        "-c", "core.fsmonitor=false",
+        "-c", "core.pager=cat",
+        "-c", "core.sshCommand=/bin/false",
+        "-c", "credential.helper=",
+        "-c", "credential.interactive=false",
+        "-c", "protocol.file.allow=never",
+        "-c", "protocol.ext.allow=never",
+        "-c", "protocol.ssh.allow=never",
+        "-c", "protocol.git.allow=never",
+        "-c", "submodule.recurse=false",
+        "-c", "fetch.recurseSubmodules=false",
+        "-c", "commit.gpgsign=false",
+    ]
     network_mode = "none"
     if request.network_enabled:
         network_mode = GIT_EGRESS_NETWORK
@@ -520,6 +556,9 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
                 "https_proxy": GIT_PROXY_URL,
             }
         )
+        git_config.extend(["-c", f"http.proxy={GIT_PROXY_URL}"])
+    else:
+        git_config.extend(["-c", "http.proxy="])
     container = None
     try:
         container = docker_client.containers.create(
@@ -530,13 +569,9 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
                 "--kill-after=5s",
                 f"{GIT_OPERATION_TIMEOUT_SECONDS}s",
                 "git",
+                "--no-pager",
                 "--literal-pathspecs",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "core.pager=cat",
-                "-c",
-                "commit.gpgsign=false",
+                *git_config,
                 *request.arguments,
             ],
             detach=True,
@@ -549,6 +584,8 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
             nano_cpus=500_000_000,
             pids_limit=64,
             read_only=True,
+            privileged=False,
+            devices=[],
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
             tmpfs={
@@ -651,6 +688,26 @@ async def reconciliation_loop() -> None:
         await asyncio.sleep(max(5, int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))))
 
 
+def prepare_broker_state() -> None:
+    root = BROKER_STATE_ROOT
+    if BROKER_LOCK_PATH.parent != root or BROKER_LOCK_PATH.name != "broker.lock":
+        raise RuntimeError("Broker lock must be broker.lock in the broker-state volume.")
+    if root.is_symlink():
+        raise RuntimeError("Broker state directory must not be a symlink.")
+    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        raise RuntimeError("Broker state path is not a directory.")
+    os.chown(root, 0, 0)
+    root.chmod(0o700)
+    if BROKER_LOCK_PATH.is_symlink() or (
+        BROKER_LOCK_PATH.exists() and not BROKER_LOCK_PATH.is_file()
+    ):
+        raise RuntimeError("Broker lock path must be a regular file.")
+    if BROKER_LOCK_PATH.exists():
+        os.chown(BROKER_LOCK_PATH, 0, 0)
+        BROKER_LOCK_PATH.chmod(0o600)
+
+
 def prepare_worker_state() -> None:
     if WORKER_STATE_ROOT.is_symlink():
         raise RuntimeError("Worker state root must not be a symbolic link.")
@@ -660,6 +717,7 @@ def prepare_worker_state() -> None:
     os.chown(WORKER_STATE_ROOT, 10002, 10001)
     WORKER_STATE_ROOT.chmod(0o700)
     allowed_files = {
+        "worker.lock",
         "snapshots.sqlite3",
         "snapshots.sqlite3-journal",
         "snapshots.sqlite3-wal",
@@ -705,18 +763,24 @@ def prepare_shared_storage_permissions(storage: XFSWorkspaceStorage) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    validate_service_token()
-    for storage in storage_backends.values():
-        storage.validate_backend()
-        prepare_shared_storage_permissions(storage)
-    prepare_worker_state()
-    ensure_image()
-    reconciler = asyncio.create_task(reconciliation_loop())
+    prepare_broker_state()
+    broker_lock = acquire_file_lock(BROKER_LOCK_PATH, "broker")
+    reconciler = None
     try:
+        validate_service_token()
+        for storage in storage_backends.values():
+            storage.validate_backend()
+            prepare_shared_storage_permissions(storage)
+        prepare_worker_state()
+        ensure_image()
+        reconciler = asyncio.create_task(reconciliation_loop())
         yield
     finally:
-        reconciler.cancel()
-        await asyncio.gather(reconciler, return_exceptions=True)
+        if reconciler is not None:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
+        if broker_lock is not None:
+            broker_lock.close()
 
 
 app = FastAPI(title="DevBox Privileged Broker", version="0.1.0", lifespan=lifespan)

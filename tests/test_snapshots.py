@@ -1,4 +1,6 @@
 import hashlib
+import io
+import os
 import secrets
 import sqlite3
 import tarfile
@@ -371,3 +373,348 @@ def test_snapshot_entry_limit_is_enforced(tmp_path):
         store.create(WORKSPACE_ID, workspace)
 
     assert store.list(WORKSPACE_ID) == []
+
+
+class VerifiedArchiveReader(io.BytesIO):
+    def verify(self):
+        return None
+
+
+def test_snapshot_restore_rejects_symlink_parent_chain(tmp_path, monkeypatch):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        regular = tarfile.TarInfo("partial.txt")
+        regular.size = len(b"partial")
+        archive.addfile(regular, io.BytesIO(b"partial"))
+        parent_link = tarfile.TarInfo("dir/sub")
+        parent_link.type = tarfile.SYMTYPE
+        parent_link.linkname = ".."
+        archive.addfile(parent_link)
+        child_link = tarfile.TarInfo("dir/sub/link")
+        child_link.type = tarfile.SYMTYPE
+        child_link.linkname = "../../outside"
+        archive.addfile(child_link)
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError, match="nested beneath another symlink"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not (workspace / "partial.txt").exists()
+    assert not (workspace / "link").is_symlink()
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+@pytest.mark.parametrize(
+    "entry_type",
+    [tarfile.LNKTYPE, tarfile.CHRTYPE, tarfile.BLKTYPE, tarfile.FIFOTYPE],
+)
+def test_snapshot_restore_rejects_hardlinks_and_special_entries(
+    tmp_path, monkeypatch, entry_type
+):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("unsupported-entry")
+        member.type = entry_type
+        member.linkname = "keep.txt"
+        member.devmajor = 1
+        member.devminor = 1
+        archive.addfile(member)
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_duplicate_normalized_paths(tmp_path, monkeypatch):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        for name in ("./duplicate.txt", "duplicate.txt"):
+            member = tarfile.TarInfo(name)
+            member.size = 1
+            archive.addfile(member, io.BytesIO(b"x"))
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError, match="duplicate archive paths"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not (workspace / "duplicate.txt").exists()
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_file_as_parent_path(tmp_path, monkeypatch):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    encrypted_path, _ = store._snapshot_record(WORKSPACE_ID, snapshot["snapshot_id"])
+
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        parent_file = tarfile.TarInfo("node")
+        parent_file.size = 1
+        archive.addfile(parent_file, io.BytesIO(b"x"))
+        child_file = tarfile.TarInfo("node/child.txt")
+        child_file.size = 1
+        archive.addfile(child_file, io.BytesIO(b"y"))
+
+    payload = archive_bytes.getvalue()
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def prepare_restore_with_archive(
+    tmp_path, monkeypatch, payload, *, max_bytes=None, max_entries=None
+):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    if max_bytes is not None:
+        store.max_snapshot_bytes = max_bytes
+    if max_entries is not None:
+        store.max_entries = max_entries
+    monkeypatch.setattr(
+        store,
+        "_decrypting_reader",
+        lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
+    )
+    return store, workspace, snapshot
+
+
+
+def test_snapshot_restore_stage_creation_failure_cleans_stage_and_resets_quota(
+    tmp_path, monkeypatch
+):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    quota_multipliers = []
+    set_project_quota = workspace_storage.set_project_quota
+
+    def record_quota(workspace_id, multiplier=1):
+        quota_multipliers.append(multiplier)
+        return set_project_quota(workspace_id, multiplier)
+
+    def fail_after_stage_creation(
+        _workspace_id, directory, _project_id, quota_multiplier=1
+    ):
+        assert quota_multiplier == 3
+        directory.mkdir()
+        raise OSError("injected staging project setup failure")
+
+    monkeypatch.setattr(workspace_storage, "set_project_quota", record_quota)
+    monkeypatch.setattr(
+        workspace_storage, "prepare_project_directory", fail_after_stage_creation
+    )
+
+    with pytest.raises(SnapshotError, match="previous workspace was retained"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    stage = workspace.parent / f".{workspace.name}.restore-stage"
+    backup = workspace.parent / f".{workspace.name}.restore-backup"
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not stage.exists()
+    assert not backup.exists()
+    assert quota_multipliers == [3, 1]
+
+
+def test_snapshot_restore_old_tree_backup_rename_failure_retains_previous_tree(
+    tmp_path, monkeypatch
+):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    quota_multipliers = []
+    set_project_quota = workspace_storage.set_project_quota
+
+    def record_quota(workspace_id, multiplier=1):
+        quota_multipliers.append(multiplier)
+        return set_project_quota(workspace_id, multiplier)
+
+    real_replace = os.replace
+    backup = workspace.parent / f".{workspace.name}.restore-backup"
+
+    def fail_old_tree_backup(source, destination):
+        if Path(source) == workspace and Path(destination) == backup:
+            raise OSError("injected old-tree backup rename failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(workspace_storage, "set_project_quota", record_quota)
+    monkeypatch.setattr(os, "replace", fail_old_tree_backup)
+
+    with pytest.raises(SnapshotError, match="previous workspace was retained"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    stage = workspace.parent / f".{workspace.name}.restore-stage"
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not stage.exists()
+    assert not backup.exists()
+    assert quota_multipliers == [3, 1]
+
+
+def test_snapshot_restore_rejects_oversized_expanded_member(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("large.txt")
+        member.size = 5
+        archive.addfile(member, io.BytesIO(b"12345"))
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, archive_bytes.getvalue(), max_bytes=4
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_excessive_entry_count(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        for name in ("one.txt", "two.txt"):
+            member = tarfile.TarInfo(name)
+            member.size = 1
+            archive.addfile(member, io.BytesIO(b"x"))
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, archive_bytes.getvalue(), max_entries=1
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_truncated_member_data(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("truncated.txt")
+        member.size = 10
+        archive.addfile(member, io.BytesIO(b"0123456789"))
+    payload = archive_bytes.getvalue()[:520]
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, payload
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+
+def test_snapshot_restore_rejects_malformed_tar_header(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        member = tarfile.TarInfo("safe.txt")
+        member.size = 1
+        archive.addfile(member, io.BytesIO(b"x"))
+    payload = bytearray(archive_bytes.getvalue())
+    payload[148:156] = b"0000000\0"
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, bytes(payload)
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_malformed_pax_record(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        member = tarfile.TarInfo("safe.txt")
+        member.pax_headers = {"path": "safe.txt"}
+        member.size = 1
+        archive.addfile(member, io.BytesIO(b"x"))
+    payload = bytearray(archive_bytes.getvalue())
+    payload[512:514] = b"99"
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, bytes(payload)
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not list(workspace.parent.glob(".*.restore-stage"))
+
+
+def test_snapshot_restore_rejects_pax_path_override_traversal(tmp_path, monkeypatch):
+    archive_bytes = io.BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        member = tarfile.TarInfo("safe.txt")
+        member.pax_headers = {"path": "../escape.txt"}
+        member.size = 1
+        archive.addfile(member, io.BytesIO(b"x"))
+
+    store, workspace, snapshot = prepare_restore_with_archive(
+        tmp_path, monkeypatch, archive_bytes.getvalue()
+    )
+
+    with pytest.raises(SnapshotError):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not (workspace.parent / "escape.txt").exists()
+    assert not list(workspace.parent.glob(".*.restore-stage"))

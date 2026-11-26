@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import docker
 import pytest
+from fastapi import HTTPException
 
 from broker import main as broker
 from worker.storage import XFSWorkspaceStorage
@@ -56,11 +57,22 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
 
         assert started["state"] == "running"
         assert container.attrs["Config"]["User"] == "10001:10001"
-        assert container.attrs["HostConfig"]["ReadonlyRootfs"] is True
-        assert container.attrs["HostConfig"]["CapDrop"] == ["ALL"]
-        assert container.attrs["HostConfig"]["NetworkMode"] == "none"
-        assert container.attrs["HostConfig"]["IpcMode"] == "private"
-        assert container.attrs["HostConfig"]["PidsLimit"] == broker.WORKSPACE_PIDS
+        host_config = container.attrs["HostConfig"]
+        assert host_config["ReadonlyRootfs"] is True
+        assert host_config["CapDrop"] == ["ALL"]
+        assert host_config["NetworkMode"] == "none"
+        assert host_config["IpcMode"] == "private"
+        assert host_config["PidsLimit"] == broker.WORKSPACE_PIDS
+        assert host_config["Privileged"] is False
+        assert host_config.get("Devices") in (None, [])
+        assert host_config.get("PidMode") not in {"host"}
+        security_opt = host_config.get("SecurityOpt") or []
+        assert "no-new-privileges:true" in security_opt
+        assert not any("unconfined" in option.lower() for option in security_opt)
+        docker_security = client.info().get("SecurityOptions", [])
+        assert any("seccomp" in option.lower() for option in docker_security)
+        if any("apparmor" in option.lower() for option in docker_security):
+            assert container.attrs.get("AppArmorProfile") == "docker-default"
         workspace_mount = next(
             mount
             for mount in container.attrs["Mounts"]
@@ -74,6 +86,23 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
             for name in directories + files:
                 os.chown(Path(root) / name, 10001, 10001)
 
+        fsmonitor_script = workspace_path / "fsmonitor.sh"
+        fsmonitor_marker = workspace_path / "fsmonitor-executed"
+        fsmonitor_script.write_text(
+            "#!/bin/sh\n"
+            "printf 'executed' > /workspace/fsmonitor-executed\n"
+            "cat >/dev/null\n"
+            "printf 'token\\0'\n",
+            encoding="utf-8",
+        )
+        fsmonitor_script.chmod(0o755)
+        os.chown(fsmonitor_script, 10001, 10001)
+        subprocess.run(
+            ["git", "config", "--local", "core.fsmonitor", "/workspace/fsmonitor.sh"],
+            cwd=workspace_path,
+            check=True,
+        )
+
         output = broker.run_git_helper(
             workspace_id,
             broker.GitHelperRequest(
@@ -82,6 +111,45 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
             ),
         )
         assert "No commits yet" in output or "On branch" in output
+        assert not fsmonitor_marker.exists(), "Repository-local fsmonitor command was executed"
+
+        bare_remote = workspace_path / "attacker.git"
+        subprocess.run(["git", "init", "--bare", "--quiet", str(bare_remote)], check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://github.com/example/repo.git"],
+            cwd=workspace_path,
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "--local",
+                "url.file:///workspace/attacker.git.insteadOf",
+                "https://github.com/example/repo.git",
+            ],
+            cwd=workspace_path,
+            check=True,
+        )
+        git_network = client.networks.create(
+            name=f"devbox-git-helper-test-{uuid4().hex[:8]}",
+            driver="bridge",
+            internal=True,
+        )
+        monkeypatch.setattr(broker, "GIT_EGRESS_NETWORK", git_network.name)
+        try:
+            with pytest.raises(HTTPException) as fetch_error:
+                broker.run_git_helper(
+                    workspace_id,
+                    broker.GitHelperRequest(
+                        arguments=["fetch", "--prune", "origin"],
+                        network_enabled=True,
+                    ),
+                )
+            assert fetch_error.value.status_code == 422
+            assert "transport 'file' not allowed" in str(fetch_error.value.detail)
+        finally:
+            git_network.remove()
         assert client.containers.list(
             all=True,
             filters={

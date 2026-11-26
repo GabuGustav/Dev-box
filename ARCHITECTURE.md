@@ -65,6 +65,21 @@ Do not mount the Docker socket or host root filesystem into untrusted build cont
 
 For stronger multi-tenant isolation, evaluate microVMs (such as Firecracker) or dedicated VMs after the container MVP is validated. Containers alone are not a complete security boundary against a determined kernel-level escape.
 
+### Current Phase 2 execution boundary
+
+The current deployment separates Docker/XFS administration from general worker operations:
+
+- **Privileged broker:** the only service with the Docker socket and `CAP_SYS_ADMIN`. It creates/removes containers, prepares the persistent state volumes, and manages XFS project quotas and restore swaps. Its private `broker_state` volume contains the project registries and a `broker.lock` advisory lock.
+- **Rootless worker:** runs as UID/GID `10002:10001`, with all Linux capabilities dropped, no Docker socket, a read-only root filesystem, and an authenticated private connection to the broker. It holds `worker_state/worker.lock` before opening the snapshot registry. The broker prepares this volume with restricted ownership and permissions.
+- **Workspace containers:** run as UID/GID `10001:10001`, receive only their own workspace directory at `/workspace`, use read-only image roots, drop all capabilities, set no-new-privileges, and have no network by default.
+- **Git helper containers:** are short-lived and receive only the selected workspace bind mount. They restrict Git to HTTPS, disable repository-local executable configuration such as fsmonitor and credential helpers, and use the private allowlisted Squid proxy for network-enabled operations.
+
+The broker and worker are single-instance per deployment. Both Uvicorn processes use one worker, and advisory locks prevent a second process/container sharing the same state volume from starting. Do not scale these services or run separate deployments against the same XFS roots. Workspace operation locks are process-local; multi-replica execution requires a distributed locking design.
+
+Workspace and Git helper containers inherit Docker's default seccomp profile and the `docker-default` AppArmor profile when AppArmor is enabled. Integration tests verify the host-reported runtime protections and reject unconfined settings. Docker user-namespace remapping is not enabled: the subordinate UID/GID mapping and bind-mount ownership requirements must first be reconciled with the XFS storage contract.
+
+For the detailed threat boundary and current residual risk, see [SECURITY.md](SECURITY.md), [STORAGE.md](STORAGE.md), and [Phase 2.3 Adversarial Hardening](docs/PHASE_2_3_ADVERSARIAL_HARDENING.md).
+
 ## 5. Persistence and data model
 
 Use a relational database (PostgreSQL is a suitable initial choice) for metadata and object/durable volume storage for workspace data and artifacts.

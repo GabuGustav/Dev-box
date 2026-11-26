@@ -374,6 +374,8 @@ class FakeRestoreStorage:
     def __init__(self, root):
         self.root = root
         self.calls = []
+        self.fail_mark = False
+        self.fail_quota = False
 
     def validate_backend(self):
         return None
@@ -384,9 +386,13 @@ class FakeRestoreStorage:
 
     def mark_workspace_initialized(self, workspace_id, directory):
         self.calls.append(("mark", workspace_id, directory))
+        if self.fail_mark:
+            raise WorkspaceStorageError("injected registry update failure")
 
     def set_project_quota(self, workspace_id, multiplier=1):
         self.calls.append(("quota", workspace_id, multiplier))
+        if self.fail_quota:
+            raise WorkspaceStorageError("injected quota update failure")
 
 
 def test_broker_commit_restore_performs_and_registers_directory_swap(tmp_path, monkeypatch):
@@ -441,3 +447,282 @@ def test_broker_initializes_worker_state_with_restricted_permissions(tmp_path, m
 
     assert state.is_dir()
     assert state.stat().st_mode & 0o777 == 0o700
+
+
+def test_broker_preserves_worker_instance_lock_file(tmp_path, monkeypatch):
+    state = tmp_path / "worker-state"
+    state.mkdir()
+    lock_file = state / "worker.lock"
+    lock_file.write_text("1234\\n", encoding="ascii")
+    monkeypatch.setattr(broker, "WORKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker.os, "chown", lambda *_args: None, raising=False)
+
+    broker.prepare_worker_state()
+
+    assert lock_file.read_text(encoding="ascii") == "1234\\n"
+    assert lock_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_broker_state_directory_is_private(tmp_path, monkeypatch):
+    state = tmp_path / "broker-state"
+    monkeypatch.setattr(broker, "BROKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker, "BROKER_LOCK_PATH", state / "broker.lock")
+    monkeypatch.setattr(broker.os, "chown", lambda *_args: None, raising=False)
+
+    broker.prepare_broker_state()
+
+    assert state.is_dir()
+    assert state.stat().st_mode & 0o777 == 0o700
+
+
+def test_broker_rejects_lock_outside_broker_state(tmp_path, monkeypatch):
+    state = tmp_path / "broker-state"
+    monkeypatch.setattr(broker, "BROKER_STATE_ROOT", state)
+    monkeypatch.setattr(broker, "BROKER_LOCK_PATH", tmp_path / "broker.lock")
+
+    with pytest.raises(RuntimeError, match="must be broker.lock in the broker-state volume"):
+        broker.prepare_broker_state()
+
+
+class FakeGitHelperContainer:
+    def __init__(self):
+        self.removed = False
+
+    def start(self):
+        return None
+
+    def wait(self, timeout=None):
+        return {"StatusCode": 0}
+
+    def logs(self, **_kwargs):
+        return b"helper ok"
+
+    def remove(self, force=False):
+        self.removed = True
+
+
+class FakeGitHelperContainers:
+    def __init__(self):
+        self.container = FakeGitHelperContainer()
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return self.container
+
+
+class FakeGitHelperDocker:
+    def __init__(self):
+        self.containers = FakeGitHelperContainers()
+
+
+def test_git_helper_overrides_repository_local_executable_configuration(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    workspace_root = tmp_path / "workspaces"
+    digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
+    workspace = workspace_root / digest
+    (workspace / ".git").mkdir(parents=True)
+    fake_docker = FakeGitHelperDocker()
+    monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
+    monkeypatch.setattr(broker, "docker_client", fake_docker)
+
+    output = broker.run_git_helper(
+        workspace_id,
+        broker.GitHelperRequest(
+            arguments=["status", "--short", "--branch"],
+            network_enabled=False,
+        ),
+    )
+
+    command = fake_docker.containers.kwargs["command"]
+    environment = fake_docker.containers.kwargs["environment"]
+    expected_config = {
+        "core.hooksPath=/dev/null",
+        "core.fsmonitor=false",
+        "core.sshCommand=/bin/false",
+        "credential.helper=",
+        "credential.interactive=false",
+        "protocol.file.allow=never",
+        "protocol.ext.allow=never",
+        "protocol.ssh.allow=never",
+        "protocol.git.allow=never",
+        "submodule.recurse=false",
+        "fetch.recurseSubmodules=false",
+        "commit.gpgsign=false",
+        "http.proxy=",
+    }
+    actual_config = {
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "-c"
+    }
+    assert expected_config <= actual_config
+    assert environment["GIT_ALLOW_PROTOCOL"] == "https"
+    assert environment["GIT_DIR"] == "/workspace/.git"
+    assert environment["GIT_WORK_TREE"] == "/workspace"
+    assert fake_docker.containers.kwargs["network_mode"] == "none"
+    assert fake_docker.containers.kwargs["cap_drop"] == ["ALL"]
+    assert fake_docker.containers.kwargs["read_only"] is True
+    assert "no-new-privileges:true" in fake_docker.containers.kwargs["security_opt"]
+    assert fake_docker.containers.kwargs["privileged"] is False
+    assert output == "helper ok"
+    assert fake_docker.containers.container.removed is True
+
+
+def test_git_fetch_helper_forces_restricted_proxy_and_https_protocol(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    workspace_root = tmp_path / "workspaces"
+    digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
+    (workspace_root / digest / ".git").mkdir(parents=True)
+    fake_docker = FakeGitHelperDocker()
+    monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
+    monkeypatch.setattr(broker, "docker_client", fake_docker)
+
+    broker.run_git_helper(
+        workspace_id,
+        broker.GitHelperRequest(
+            arguments=["fetch", "--prune", "origin"],
+            network_enabled=True,
+        ),
+    )
+
+    command = fake_docker.containers.kwargs["command"]
+    environment = fake_docker.containers.kwargs["environment"]
+    assert "http.proxy=http://egress-proxy:3128" in command
+    assert environment["GIT_ALLOW_PROTOCOL"] == "https"
+    assert environment["HTTPS_PROXY"] == broker.GIT_PROXY_URL
+    assert fake_docker.containers.kwargs["network_mode"] == broker.GIT_EGRESS_NETWORK
+
+
+def test_git_helper_rejects_symlinked_git_metadata(tmp_path, monkeypatch):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    workspace_root = tmp_path / "workspaces"
+    digest = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:32]
+    workspace = workspace_root / digest
+    workspace.mkdir(parents=True)
+    outside = tmp_path / "outside-git"
+    outside.mkdir()
+    (workspace / ".git").symlink_to(outside, target_is_directory=True)
+    fake_docker = FakeGitHelperDocker()
+    monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
+    monkeypatch.setattr(broker, "docker_client", fake_docker)
+
+    with pytest.raises(HTTPException) as error:
+        broker.run_git_helper(
+            workspace_id,
+            broker.GitHelperRequest(
+                arguments=["status", "--short", "--branch"],
+                network_enabled=False,
+            ),
+        )
+
+    assert error.value.status_code == 409
+    assert fake_docker.containers.kwargs is None
+
+
+def test_broker_restore_swap_failure_rolls_back_and_recovery_is_idempotent(
+    tmp_path, monkeypatch
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "previous.txt").write_text("previous", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "restored.txt").write_text("restored", encoding="utf-8")
+    real_replace = broker.os.replace
+
+    def fail_stage_swap(source, destination):
+        if source == stage and destination == workspace:
+            raise OSError("injected stage-swap failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(broker.os, "replace", fail_stage_swap)
+
+    with pytest.raises(HTTPException) as error:
+        broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert error.value.status_code == 503
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert stage.is_dir()
+    assert not (tmp_path / f".{workspace.name}.restore-backup").exists()
+
+    first_recovery = broker.api_recover_storage_restore("workspace", workspace_id)
+    second_recovery = broker.api_recover_storage_restore("workspace", workspace_id)
+
+    assert first_recovery["state"] == "recovered"
+    assert second_recovery["state"] == "recovered"
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert not stage.exists()
+
+
+@pytest.mark.parametrize("failure_point", ["mark", "quota"])
+def test_broker_restore_metadata_failures_roll_back_to_previous_tree(
+    tmp_path, monkeypatch, failure_point
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    if failure_point == "mark":
+        storage.fail_mark = True
+    else:
+        storage.fail_quota = True
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "previous.txt").write_text("previous", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "restored.txt").write_text("restored", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as error:
+        broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert error.value.status_code == 503
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert not (workspace / "restored.txt").exists()
+    assert not stage.exists()
+    assert not (tmp_path / f".{workspace.name}.restore-backup").exists()
+
+
+def test_broker_restore_backup_cleanup_failure_can_be_recovered(
+    tmp_path, monkeypatch
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "previous.txt").write_text("previous", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "restored.txt").write_text("restored", encoding="utf-8")
+    backup = tmp_path / f".{workspace.name}.restore-backup"
+    real_rmtree = broker.shutil.rmtree
+
+    cleanup_failures_remaining = 1
+
+    def fail_backup_cleanup(path, *args, **kwargs):
+        nonlocal cleanup_failures_remaining
+        if path == backup and cleanup_failures_remaining:
+            cleanup_failures_remaining -= 1
+            raise OSError("injected backup cleanup failure")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(broker.shutil, "rmtree", fail_backup_cleanup)
+
+    with pytest.raises(HTTPException) as error:
+        broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert error.value.status_code == 503
+    assert (workspace / "restored.txt").read_text(encoding="utf-8") == "restored"
+    assert (backup / "previous.txt").read_text(encoding="utf-8") == "previous"
+
+    recovery = broker.api_recover_storage_restore("workspace", workspace_id)
+
+    assert recovery["state"] == "recovered"
+    assert (workspace / "restored.txt").read_text(encoding="utf-8") == "restored"
+    assert not (workspace / "previous.txt").exists()
+    assert not backup.exists()
+    assert not stage.exists()

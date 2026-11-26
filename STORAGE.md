@@ -52,7 +52,7 @@ SNAPSHOT_ENCRYPTION_KEY=<32-byte-url-safe-base64-key>
 
 Generate the encryption key once with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Store it in a secret manager or protected deployment environment, and keep a secure backup separate from the snapshot filesystem. Losing this key makes the snapshots permanently unrecoverable; changing it without re-encrypting existing snapshots has the same effect.
 
-Both host directories must exist and already be mounted. Compose bind-mounts them into the broker and worker using the same absolute paths. The snapshot filesystem is separate so snapshot retention cannot consume the live workspace filesystem's capacity. Compose also mounts a persistent `worker_state` volume into the broker and worker; the broker initializes it as UID/GID `10002:10001`, mode `0700`. If custom paths are selected, use those exact paths in .env.
+Both host directories must exist and already be mounted. Compose bind-mounts them into the broker and worker using the same absolute paths. The snapshot filesystem is separate so snapshot retention cannot consume the live workspace filesystem's capacity. Compose also mounts a persistent `worker_state` volume into the broker and worker; the broker initializes it as UID/GID `10002:10001`, mode `0700`. The worker creates `worker.lock` in this volume before opening the snapshot registry; the broker preserves its owner and mode during startup preparation. The broker's private `broker_state` volume contains the XFS project registries and `broker.lock`. Both advisory locks are held for the service lifetime and enforce one broker and one worker per Compose deployment. Both Uvicorn processes are explicitly configured for one worker. Do not scale either service or share the XFS roots across independent deployments. If custom paths are selected, use those exact paths in .env.
 
 ## Provisioning contract
 
@@ -155,3 +155,8 @@ Real XFS/Docker integration, adversarial snapshot archive tests, interrupted-res
 - **Broker:** runs with Docker socket access and `CAP_SYS_ADMIN`; it owns the XFS project registries and is the only service that runs `findmnt`/`xfs_quota` operations. Its API exposes fixed workspace-scoped operations and bounded quota multipliers, not arbitrary host paths or Docker API passthrough.
 - **Worker:** runs as UID/GID `10002:10001`, has no Docker SDK/socket, no XFS tools, no `CAP_SYS_ADMIN`, and no Linux capabilities. Its root filesystem is read-only. It can read/write per-workspace directories through GID 10001 but cannot write to XFS mount roots; restore directory swaps are broker-owned.
 - **Residual trust:** the worker can access every workspace directory on the shared mounts. The current design reduces host-level privilege but does not protect tenant data from a compromised worker. Per-workspace host identities or microVMs remain necessary for hostile multi-tenant guarantees.
+
+
+## Single-instance state locks
+
+The broker holds `broker_state/broker.lock`; the worker holds `worker_state/worker.lock` before opening its snapshot registry. These advisory file locks are released when their process exits. They prevent multiple broker/worker instances in the same deployment from concurrently managing the shared XFS trees. This is a single-instance deployment contract, not distributed locking; do not scale these services or share the same XFS roots between independent Compose projects.

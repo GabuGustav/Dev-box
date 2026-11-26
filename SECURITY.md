@@ -32,6 +32,10 @@ Default policy:
 
 The privileged broker has Docker socket access and CAP_SYS_ADMIN to administer XFS quotas; compromise of the broker can compromise the host. Keep it private and treat it as a privileged infrastructure component. The worker runs as UID/GID 10002:10001, drops all Linux capabilities, uses no-new-privileges and a read-only root filesystem, and reaches the broker only over a private authenticated network. The worker still has group-based read/write access to all workspace and snapshot trees, so a compromised worker can access multiple tenants' data. This is a blast-radius reduction, not hostile-tenant isolation. Containers reduce risk but share the host kernel. For hostile multi-tenant workloads, evaluate microVMs or dedicated VMs as a stronger boundary.
 
+The broker and worker are single-instance services per deployment. The broker holds an advisory lock in `broker_state`; the worker holds an advisory lock in `worker_state` before opening its snapshot registry. Both Uvicorn processes are configured for one worker. Do not scale either service or run multiple independent deployments against the same XFS roots; the current workspace operation locks are process-local. Multi-replica operation requires a distributed lock and shared-storage ownership design.
+
+Workspace and Git helper containers do not request unconfined seccomp or AppArmor. They inherit Docker's default seccomp profile and, when enabled by the host, the `docker-default` AppArmor profile. Linux integration tests inspect the active Docker security options and container profile rather than pinning a custom profile that could break supported hosts. Docker user-namespace remapping is deferred: it requires subordinate UID/GID ranges and pre-arranged bind-mount ownership, which must be reconciled with the current XFS ownership contract before enabling it.
+
 ## 4. Identity and authorization
 
 - Authenticate humans and agents separately.
@@ -68,7 +72,7 @@ Default to restricted egress. Allow only the network access needed for configure
 
 Apply DNS and IP-level controls to reduce DNS rebinding and SSRF risks. Network allowlists must be configurable per workload class.
 
-The initial controlled-egress foundation uses a dedicated internal-only Docker network for outbound helper containers. A private Squid proxy is the only service attached to both that internal network and the external bridge; it is not published on a host port. The proxy allows only approved Git hosting and package domains, denies private, loopback, link-local, and other local destinations, and denies all unlisted domains. Ordinary workspace containers remain on `network_mode=none`; only explicitly managed helper containers should join the restricted egress network. This proxy foundation does not yet mean repository cloning or arbitrary workspace internet access is enabled.
+The initial controlled-egress foundation uses a dedicated internal-only Docker network for outbound helper containers. A private Squid proxy is the only service attached to both that internal network and the external bridge; it is not published on a host port. The proxy allows only approved Git hosting and package domains, denies private, loopback, link-local, and special IPv4/IPv6 destinations (including NAT64 and 6to4 translation ranges), and denies all unlisted domains. Its destination-IP ACL resolves domain names before allowing the request; a Linux integration test supplies a private DNS answer for an allowlisted Git host and requires a deny response. Ordinary workspace containers remain on `network_mode=none`; only explicitly managed Git helper containers should join the restricted egress network. This proxy foundation does not enable arbitrary workspace internet access.
 
 ## 7. Secrets and credentials
 
@@ -89,12 +93,16 @@ The initial controlled-egress foundation uses a dedicated internal-only Docker n
 - Require explicit authorization for push, merge, release, or publication.
 - Detect dirty working trees and conflicts before destructive operations.
 - Keep an audit record of commits and remote changes.
+- Run Git operations in a short-lived, unprivileged helper container with only the workspace bind mount; do not mount the Docker socket or XFS roots.
+- Disable repository-local fsmonitor commands, credential helpers, SSH command overrides, hooks, and submodule recursion in the helper.
+- Restrict Git transport to HTTPS and force network-enabled operations through the allowlisted egress proxy.
 
 ## 9. Persistence, snapshots, and deletion
 
 - Encrypt data in transit and at rest.
 - Restrict snapshots and backups to authorized workspace owners and trusted services.
 - Encrypt snapshot archives with authenticated encryption (AES-256-GCM) and store them on a separate quota-limited filesystem.
+- Validate every archive path and entry type; reject normalized duplicates, hard links, special files, traversal, escaping symlinks, and any archive entry nested beneath a symlink entry. The last rule prevents a symlink parent from redirecting creation of a later link outside the extraction stage.
 - Keep the snapshot encryption key outside the snapshot filesystem and back it up securely; key loss makes existing snapshots unrecoverable.
 - Treat snapshot contents as sensitive: archives include workspace files as-is, including credentials accidentally written into the workspace. Encryption protects data at rest but does not remove secrets from the archive.
 - Validate archive paths and symbolic links before restore; reject traversal and unsupported filesystem objects.

@@ -20,6 +20,7 @@ from worker.broker_client import (
     BrokerRejected,
     BrokerUnavailable,
 )
+from worker.instance_lock import acquire_file_lock
 from worker.remote_storage import RemoteWorkspaceStorage
 from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.storage import WorkspaceStorageError
@@ -37,6 +38,21 @@ SNAPSHOT_INODE_LIMIT = int(os.getenv("DEVBOX_SNAPSHOT_INODE_LIMIT", "50000"))
 SNAPSHOT_ENCRYPTION_KEY = os.getenv("DEVBOX_SNAPSHOT_ENCRYPTION_KEY", "")
 SNAPSHOT_MAX_COUNT = int(os.getenv("DEVBOX_SNAPSHOT_MAX_COUNT", "10"))
 SNAPSHOT_MAX_BYTES = int(os.getenv("DEVBOX_SNAPSHOT_MAX_BYTES", str(10 * 1024**3)))
+SNAPSHOT_REGISTRY_PATH = Path(
+    os.getenv("DEVBOX_SNAPSHOT_REGISTRY_PATH", "/var/lib/devbox-worker/snapshots.sqlite3")
+)
+WORKER_LOCK_PATH = Path(
+    os.getenv("DEVBOX_WORKER_LOCK_PATH", str(SNAPSHOT_REGISTRY_PATH.with_name("worker.lock")))
+)
+WORKER_LOCK_ENABLED = os.getenv("DEVBOX_WORKER_LOCK_ENABLED", "0") == "1"
+if (
+    WORKER_LOCK_PATH.parent != SNAPSHOT_REGISTRY_PATH.parent
+    or WORKER_LOCK_PATH.name != "worker.lock"
+):
+    raise RuntimeError("Worker lock must be worker.lock in the worker-state volume.")
+WORKER_LOCK_HANDLE = (
+    acquire_file_lock(WORKER_LOCK_PATH, "worker") if WORKER_LOCK_ENABLED else None
+)
 RECONCILE_INTERVAL_SECONDS = int(os.getenv("DEVBOX_RECONCILE_INTERVAL_SECONDS", "60"))
 broker_client = BrokerClient()
 workspace_storage = RemoteWorkspaceStorage(
@@ -59,9 +75,7 @@ snapshot_store = SnapshotStore(
     SNAPSHOT_ENCRYPTION_KEY,
     max_snapshots=SNAPSHOT_MAX_COUNT,
     max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
-    registry_path=os.getenv(
-        "DEVBOX_SNAPSHOT_REGISTRY_PATH", "/var/lib/devbox-worker/snapshots.sqlite3"
-    ),
+    registry_path=SNAPSHOT_REGISTRY_PATH,
     require_group_permissions=True,
 )
 
@@ -202,7 +216,13 @@ def names_for(workspace_id: str) -> tuple[str, str]:
     return f"devbox-ws-{digest}", f"xfs-{digest}"
 
 
-_workspace_locks: dict[str, threading.RLock] = {}
+class _WorkspaceLockEntry:
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.users = 0
+
+
+_workspace_locks: dict[str, _WorkspaceLockEntry] = {}
 _workspace_locks_guard = threading.Lock()
 
 
@@ -210,9 +230,19 @@ _workspace_locks_guard = threading.Lock()
 def workspace_lock(workspace_id: str):
     names_for(workspace_id)
     with _workspace_locks_guard:
-        lock = _workspace_locks.setdefault(workspace_id, threading.RLock())
-    with lock:
-        yield
+        entry = _workspace_locks.get(workspace_id)
+        if entry is None:
+            entry = _WorkspaceLockEntry()
+            _workspace_locks[workspace_id] = entry
+        entry.users += 1
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _workspace_locks_guard:
+            entry.users -= 1
+            if entry.users == 0 and _workspace_locks.get(workspace_id) is entry:
+                del _workspace_locks[workspace_id]
 
 
 def serialize_workspace_operation(function):
@@ -298,24 +328,30 @@ async def reconciliation_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if not SERVICE_TOKEN:
-        logger.warning(
-            "DEVBOX_EXECUTOR_TOKEN is not configured; internal calls will be rejected."
-        )
-    broker_client.validate_config()
+    if WORKER_LOCK_ENABLED and WORKER_LOCK_HANDLE is None:
+        raise RuntimeError("The worker single-instance lock is unavailable.")
+    reconciler = None
     try:
-        broker_client.validate_connection()
-    except BrokerError as exc:
-        raise RuntimeError(
-            "Privileged broker authentication/readiness check failed."
-        ) from exc
-    reconciler = asyncio.create_task(reconciliation_loop())
-    try:
+        if not SERVICE_TOKEN:
+            logger.warning(
+                "DEVBOX_EXECUTOR_TOKEN is not configured; internal calls will be rejected."
+            )
+        broker_client.validate_config()
+        try:
+            broker_client.validate_connection()
+        except BrokerError as exc:
+            raise RuntimeError(
+                "Privileged broker authentication/readiness check failed."
+            ) from exc
+        reconciler = asyncio.create_task(reconciliation_loop())
         yield
     finally:
-        reconciler.cancel()
-        await asyncio.gather(reconciler, return_exceptions=True)
+        if reconciler is not None:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
         broker_client.close()
+        if WORKER_LOCK_HANDLE is not None:
+            WORKER_LOCK_HANDLE.close()
 
 
 app = FastAPI(title="DevBox Executor", version="0.1.0", lifespan=lifespan)

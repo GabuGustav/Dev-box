@@ -1,4 +1,6 @@
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import HTTPException
@@ -382,3 +384,60 @@ def test_internal_service_requires_configured_token(monkeypatch):
     assert error.value.status_code == 401
 
     assert executor.require_service_token("Bearer test-secret") is None
+
+
+def test_workspace_lock_registry_releases_idle_entries():
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+
+    with executor.workspace_lock(workspace_id):
+        entry = executor._workspace_locks[workspace_id]
+        assert entry.users == 1
+        with executor.workspace_lock(workspace_id):
+            assert executor._workspace_locks[workspace_id] is entry
+            assert entry.users == 2
+
+    assert workspace_id not in executor._workspace_locks
+
+
+def test_workspace_lock_serializes_same_workspace_threads():
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+
+    def first_operation():
+        with executor.workspace_lock(workspace_id):
+            first_entered.set()
+            if not release_first.wait(timeout=5):
+                raise TimeoutError("First workspace operation was not released.")
+
+    def second_operation():
+        if not first_entered.wait(timeout=5):
+            raise TimeoutError("First workspace operation did not start.")
+        with executor.workspace_lock(workspace_id):
+            second_entered.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(first_operation)
+        assert first_entered.wait(timeout=5)
+        second = pool.submit(second_operation)
+        assert not second_entered.wait(timeout=0.05)
+        release_first.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+
+    assert second_entered.is_set()
+    assert workspace_id not in executor._workspace_locks
+
+
+def test_workspace_locks_allow_different_workspaces_to_run_in_parallel():
+    first_id = "dbx_abcdefghijklmnopqrstuv"
+    second_id = "dbx_zyxwvutsrqponmlkjihgfe"
+
+    with executor.workspace_lock(first_id):
+        with executor.workspace_lock(second_id):
+            assert first_id in executor._workspace_locks
+            assert second_id in executor._workspace_locks
+
+    assert first_id not in executor._workspace_locks
+    assert second_id not in executor._workspace_locks

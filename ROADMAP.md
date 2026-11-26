@@ -47,14 +47,21 @@ This roadmap sequences the project so each phase produces a testable result. Est
 
 ### Phase 2 security-hardening overlay
 
-The implementation checklist and exit gates are tracked in [Phase 2 Security Hardening](docs/PHASE_2_SECURITY_HARDENING.md), [Phase 2.2 Privileged Broker](docs/PHASE_2_2_PRIVILEGED_BROKER.md), and [Rootless Worker](docs/PHASE_2_2_3_ROOTLESS_WORKER.md). Phase 2 is **not security-release complete** until the deployment exposure, privileged-worker boundary, runtime isolation, storage recovery, network egress, concurrency, and CI verification gates in that plan are closed. Source-level controls and mocked tests do not substitute for Linux XFS/Docker integration and adversarial testing.
+The implementation checklist and exit gates are tracked in [Phase 2 Security Hardening](docs/PHASE_2_SECURITY_HARDENING.md), [Phase 2.2 Privileged Broker](docs/PHASE_2_2_PRIVILEGED_BROKER.md), and [Rootless Worker](docs/PHASE_2_2_3_ROOTLESS_WORKER.md), plus the active [Phase 2.3 Adversarial Hardening](docs/PHASE_2_3_ADVERSARIAL_HARDENING.md) plan. Phase 2 is **not security-release complete** until the deployment exposure, privileged-worker boundary, runtime isolation, storage recovery, network egress, concurrency, and CI verification gates in that plan are closed. Source-level controls and mocked tests do not substitute for Linux XFS/Docker integration and adversarial testing.
 
 - [x] Complete source-level security investigation and record confirmed risks versus unverified hypotheses.
 - [x] Complete deployment exposure and secret-hygiene fixes (CI run 45860830556 passed).
 - [x] Move Docker lifecycle, Git helper execution, and XFS quota administration behind the private broker; worker has no Docker socket or `CAP_SYS_ADMIN` (CI run 45864319247 passed).
 - [x] Verify the Compose schema correction on the latest base (CI run 45868184349 passed).
 - [x] Verify the dedicated UID/GID `10002:10001`, non-writable XFS mount roots, worker-state migration, and broker-owned restore swaps on `phase-2-rootless-worker-hardening` (CI run 45870278489 passed: 174 unit tests, seven skipped, seven Linux integration tests).
-- [ ] Complete adversarial snapshot/archive, egress bypass, cross-workspace, and concurrency testing.
+- [x] Implement Git helper configuration overrides and add malicious fsmonitor/file-transport regression tests (CI pending).
+- [x] Reject symlink-parent archive entries and add regression coverage for duplicate paths, hard links, special entries, and file-parent collisions; fault-injected restore drills and fuzzing remain.
+- [x] Expand proxy destination blocks to NAT64/6to4 and add a DNS-to-private integration test (CI pending).
+- [x] Add Docker runtime-profile assertions while retaining cross-workspace filesystem and PID isolation integration coverage (CI pending).
+- [x] Enforce one broker and one worker per deployment with advisory volume locks; reference-count workspace locks and configure one Uvicorn worker.
+- [x] Run Phase 2.3 CI and fix all failures (run 45907271567 passed: Ruff, four image builds, Compose validation, 201 unit tests, and Linux XFS/Docker integration; 8 opt-in tests skipped in the quality job).
+- [x] Complete restore transition fault injection and malformed tar/PAX regression tests.
+- [ ] Evaluate property-based archive fuzzing; add DNS-rebinding/redirect tests and broader concurrency/device/mount isolation tests.
 - [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed in run 45864319247; extended recovery/fuzz drills remain).
 
 ## Phase 3 — Git and repository discovery

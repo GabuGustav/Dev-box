@@ -489,6 +489,7 @@ class SnapshotStore:
 
     def _extract(self, encrypted_path: Path, workspace_id: str, snapshot_id: str, staging: Path):
         entries = set()
+        entry_kinds = {}
         symlinks = []
         total_size = 0
         with encrypted_path.open("rb") as source:
@@ -514,20 +515,46 @@ class SnapshotStore:
                     if staging not in destination.parents:
                         raise SnapshotError("Snapshot path escapes the restore directory.")
                     if member.isdir():
+                        entry_kinds[relative] = "directory"
                         destination.mkdir(parents=True, exist_ok=True)
                         destination.chmod(0o770)
                     elif member.issym():
+                        entry_kinds[relative] = "symlink"
                         symlinks.append((destination, member.linkname))
                     else:
+                        entry_kinds[relative] = "file"
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         input_file = archive.extractfile(member)
                         if input_file is None:
                             raise SnapshotError("Snapshot file contents are unavailable.")
+                        copied = 0
                         with input_file, destination.open("xb") as output_file:
-                            shutil.copyfileobj(input_file, output_file, CHUNK_SIZE)
+                            while chunk := input_file.read(CHUNK_SIZE):
+                                copied += len(chunk)
+                                if copied > member.size:
+                                    raise SnapshotError(
+                                        "Snapshot archive member exceeds its declared size."
+                                    )
+                                output_file.write(chunk)
+                        if copied != member.size:
+                            raise SnapshotError("Snapshot archive member data is truncated.")
                         destination.chmod(0o770 if member.mode & 0o111 else 0o660)
             reader.verify()
 
+        for relative, _kind in entry_kinds.items():
+            for parent in PurePosixPath(relative).parents:
+                parent_name = parent.as_posix()
+                if parent_name == ".":
+                    continue
+                parent_kind = entry_kinds.get(parent_name)
+                if parent_kind == "symlink":
+                    raise SnapshotError(
+                        "Snapshot archive contains a symlink nested beneath another symlink."
+                    )
+                if parent_kind == "file":
+                    raise SnapshotError(
+                        "Snapshot archive path traverses a non-directory entry."
+                    )
         for destination, target in symlinks:
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() or destination.is_symlink():
