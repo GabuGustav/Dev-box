@@ -149,6 +149,16 @@ class SnapshotStore:
     def _migrate_legacy_registry(self) -> None:
         if self.registry.is_symlink():
             raise SnapshotError("Snapshot metadata registry path is unsafe.")
+        temporary = self.registry.with_name(self.registry.name + ".migrating")
+        if temporary.is_symlink() or (temporary.exists() and not temporary.is_file()):
+            raise SnapshotError("Snapshot metadata migration path is unsafe.")
+        if temporary.exists():
+            temporary.unlink()
+        for suffix in ("-journal", "-wal", "-shm"):
+            sidecar = temporary.with_name(temporary.name + suffix)
+            if sidecar.is_symlink() or (sidecar.exists() and not sidecar.is_file()):
+                raise SnapshotError("Snapshot metadata migration sidecar is unsafe.")
+            sidecar.unlink(missing_ok=True)
         if self.registry == self.legacy_registry or self.registry.exists():
             if self.registry.exists() and not self.registry.is_file():
                 raise SnapshotError("Snapshot metadata registry path is unsafe.")
@@ -158,9 +168,6 @@ class SnapshotStore:
             return
         if legacy.is_symlink() or not legacy.is_file():
             raise SnapshotError("Legacy snapshot metadata registry is unsafe.")
-        temporary = self.registry.with_name(self.registry.name + ".migrating")
-        if temporary.is_symlink() or temporary.exists():
-            raise SnapshotError("Snapshot metadata migration path already exists or is unsafe.")
         try:
             self.registry.parent.mkdir(parents=True, exist_ok=True)
             source = sqlite3.connect(legacy.resolve().as_uri() + "?mode=ro", uri=True)
