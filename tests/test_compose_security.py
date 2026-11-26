@@ -40,3 +40,18 @@ def test_worker_and_broker_share_only_the_private_broker_network_for_rpc():
     assert "broker_internal" in compose["services"]["worker"]["networks"]
     assert "broker_internal" in compose["services"]["broker"]["networks"]
     assert "broker_internal" not in compose["services"]["api"]["networks"]
+
+def test_worker_does_not_receive_docker_socket():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker_mounts = compose["services"]["worker"]["volumes"]
+    broker_mounts = compose["services"]["broker"]["volumes"]
+    assert not any("/var/run/docker.sock" in mount for mount in worker_mounts)
+    assert any("/var/run/docker.sock" in mount for mount in broker_mounts)
+
+
+def test_worker_waits_for_broker_and_receives_distinct_token():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    assert worker["depends_on"]["broker"]["condition"] == "service_healthy"
+    assert worker["environment"]["DEVBOX_BROKER_URL"] == "http://broker:9100"
+    assert "BROKER_SERVICE_TOKEN" in worker["environment"]["DEVBOX_BROKER_TOKEN"]
