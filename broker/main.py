@@ -539,7 +539,8 @@ def run_git_helper(workspace_id: str, request: GitHelperRequest) -> str:
         raise
     except (APIError, DockerException) as exc:
         logger.exception(
-            "Git helper could not execute", extra={"workspace_id": workspace_id}
+            "Git helper could not execute",
+            extra={"workspace_id": workspace_id},
         )
         raise HTTPException(status_code=503, detail="Git execution service is unavailable.") from exc
     finally:
