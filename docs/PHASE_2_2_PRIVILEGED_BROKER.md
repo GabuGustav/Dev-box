@@ -92,30 +92,30 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 **Exit:** worker has no `CAP_SYS_ADMIN`; it cannot invoke XFS commands or choose arbitrary host mount paths.
 
 ### 2.2.4 — Docker lifecycle migration
-- [ ] Move fixed workspace container create/start/stop/pause/unpause/remove/inspect to broker methods.
-- [ ] Move image ensure/build to broker startup with a fixed build context and fixed image tag.
-- [ ] Move managed-container reconciliation and orphan helper cleanup into the broker.
-- [ ] Replace worker Docker SDK use with a typed HTTP broker client.
+- [x] Move fixed workspace container create/start/stop/pause/unpause/remove/inspect to broker methods.
+- [x] Move image ensure/build to broker startup with a fixed build context and fixed image tag.
+- [x] Move managed-container reconciliation and orphan helper cleanup into the broker.
+- [x] Replace worker Docker SDK use with an authenticated HTTP broker client.
 - [ ] Preserve the current workspace container hardening profile and verify actual Docker HostConfig after creation.
 - [ ] Add idempotency and interrupted-operation tests.
 
 **Exit:** worker imports no Docker SDK and cannot issue Docker daemon requests directly.
 
 ### 2.2.5 — Git helper migration
-- [ ] Move ephemeral Git helper container lifecycle into broker.
+- [x] Move ephemeral Git helper container lifecycle into broker.
 - [ ] Send typed Git operation requests, not arbitrary Docker command/configuration.
-- [ ] Keep repository URL/branch/path validation in a shared module and repeat critical validation in the broker.
+- [x] Keep repository URL/branch/path validation in worker routes and repeat critical validation in the broker.
 - [ ] Keep fixed image, workspace mount, resource limits, bounded time/output, and restricted egress proxy.
 - [ ] Add hostile Git config, timeout, output truncation, and helper cleanup tests.
 
 **Exit:** Git operations work without giving worker Docker access or weakening helper isolation.
 
 ### 2.2.6 — Remove ambient worker privilege
-- [ ] Remove `/var/run/docker.sock` from worker mounts.
+- [x] Remove `/var/run/docker.sock` from worker mounts.
 - [ ] Remove `CAP_SYS_ADMIN` from worker.
 - [ ] Run worker under a dedicated non-root UID/GID where compatible with shared storage access; document any remaining group-based access.
 - [ ] Keep Docker socket and XFS authority only in the broker.
-- [ ] Verify workspace containers cannot resolve or connect to broker service/network.
+- [x] Verify workspace containers cannot resolve or connect to broker service/network through Compose topology tests.
 
 **Exit:** runtime inspection confirms worker has no Docker socket, no `CAP_SYS_ADMIN`, and broker is not reachable from untrusted workspace containers.
 
@@ -140,7 +140,7 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 ## Progress log
 
 - [x] Source inventory: `worker/main.py`, `worker/storage.py`, `worker/snapshots.py`, `docker-compose.yml`, `worker.Dockerfile`, and related tests inspected.
-- [ ] Broker API design reviewed and fully integrated. Initial broker endpoints, Git command allowlist, service-token validation, Docker lifecycle methods, and unit tests are implemented; worker route migration and XFS delegation are still pending.
+- [ ] Broker API design fully integrated. Docker lifecycle, Git helper execution, and worker RPC migration are complete; XFS delegation, non-root worker, and broker live integration tests remain.
 - [x] Added broker package, FastAPI service, dedicated Docker image, internal Compose network, separate broker token, and unit tests for authorization, path validation, fixed workspace container configuration, Git command allowlisting, and idempotent stop behavior.
 - [x] CI run 45862764928: broker image build, proxy/workspace image builds, Compose validation, Ruff, and 132 tests passed; five XFS/Docker tests skipped in the quality job. The separate Linux XFS/Docker integration job passed all five tests. Broker-inclusive coverage: 69%.
 - [ ] Broker service has not yet been connected to worker routes; worker still mounts Docker socket and has `CAP_SYS_ADMIN`.
@@ -184,3 +184,8 @@ Move Docker SDK usage entirely to the broker. The worker-side client exposes nam
 - managed container and orphan-helper reconciliation.
 
 The broker derives the container name and workspace mount path itself. Worker-supplied values must never select an image, mount, device, capability, network, entrypoint, or Docker host configuration.
+
+
+### Verified worker-to-broker migration
+
+CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed: both Docker images (broker and worker), Compose validation, Ruff, 146 tests passed, 5 skipped, 71% coverage; the dedicated Linux XFS/Docker integration job passed all five integration tests. The worker no longer has a Docker socket or Docker SDK. It still has `CAP_SYS_ADMIN` pending the XFS storage migration.
