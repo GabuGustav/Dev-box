@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from pydantic import model_validator
+from sqlalchemy.engine import make_url
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,7 +34,20 @@ class Settings(BaseSettings):
             database_url = self.database_url.lower()
             if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
                 raise ValueError("Production requires a PostgreSQL DATABASE_URL.")
-            if any(value in database_url for value in ("devbox:devbox@", "change-me", "replace-with-a-unique-random-secret", "local-development-only")):
+            parsed_database_url = make_url(self.database_url)
+            if not parsed_database_url.host or not parsed_database_url.password:
+                raise ValueError("Production DATABASE_URL requires a database host and password.")
+            if len(parsed_database_url.password) < 24:
+                raise ValueError("Production database password must contain at least 24 characters.")
+            if any(
+                value in database_url
+                for value in (
+                    "devbox:devbox@",
+                    "change-me",
+                    "replace-with-a-unique-random-secret",
+                    "local-development-only",
+                )
+            ):
                 raise ValueError("Production DATABASE_URL contains placeholder credentials.")
         return self
 
