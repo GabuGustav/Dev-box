@@ -43,6 +43,12 @@ services:
     environment:
       DEVBOX_BROKER_TOKEN: ${BROKER_SERVICE_TOKEN:?Set BROKER_SERVICE_TOKEN in .env}
       DEVBOX_WORKSPACE_STORAGE_ROOT: ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
+      DEVBOX_SNAPSHOT_STORAGE_ROOT: ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
+      DEVBOX_WORKSPACE_DISK_QUOTA: ${WORKSPACE_DISK_QUOTA:-10g}
+      DEVBOX_SNAPSHOT_DISK_QUOTA: ${SNAPSHOT_DISK_QUOTA:-20g}
+      DEVBOX_WORKSPACE_INODE_LIMIT: ${WORKSPACE_INODE_LIMIT:-200000}
+      DEVBOX_SNAPSHOT_INODE_LIMIT: ${SNAPSHOT_INODE_LIMIT:-50000}
+      DEVBOX_BROKER_STATE_ROOT: /var/lib/devbox-broker
       DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
     cap_add:
       - SYS_ADMIN
@@ -50,6 +56,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
       - ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}:${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
+      - broker_state:/var/lib/devbox-broker
     networks:
       - broker_internal
     healthcheck:
@@ -72,10 +79,6 @@ services:
       DEVBOX_EXECUTOR_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
       DEVBOX_BROKER_URL: http://broker:9100
       DEVBOX_BROKER_TOKEN: ${BROKER_SERVICE_TOKEN:?Set BROKER_SERVICE_TOKEN in .env}
-      DEVBOX_WORKSPACE_IMAGE: devbox-workspace:0.2
-      DEVBOX_WORKSPACE_CPU: ${WORKSPACE_CPU_LIMIT:-1.0}
-      DEVBOX_WORKSPACE_MEMORY: ${WORKSPACE_MEMORY_LIMIT:-1g}
-      DEVBOX_WORKSPACE_PIDS: ${WORKSPACE_PIDS_LIMIT:-256}
       DEVBOX_WORKSPACE_STORAGE_ROOT: ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
       DEVBOX_WORKSPACE_DISK_QUOTA: ${WORKSPACE_DISK_QUOTA:-10g}
       DEVBOX_WORKSPACE_INODE_LIMIT: ${WORKSPACE_INODE_LIMIT:-200000}
@@ -86,11 +89,6 @@ services:
       DEVBOX_SNAPSHOT_MAX_COUNT: ${SNAPSHOT_MAX_COUNT:-10}
       DEVBOX_SNAPSHOT_MAX_BYTES: ${SNAPSHOT_MAX_BYTES:-10737418240}
       DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
-      DEVBOX_GIT_EGRESS_NETWORK: devbox_egress_internal
-      DEVBOX_GIT_PROXY_URL: http://egress-proxy:3128
-      DEVBOX_GIT_OPERATION_TIMEOUT_SECONDS: ${GIT_OPERATION_TIMEOUT_SECONDS:-300}
-    cap_add:
-      - SYS_ADMIN
     networks:
       - default
       - broker_internal
@@ -125,6 +123,7 @@ services:
 
 volumes:
   devbox_postgres:
+  broker_state:
 
 networks:
   egress_internal:
