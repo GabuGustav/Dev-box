@@ -43,7 +43,7 @@ def test_production_accepts_non_placeholder_configuration():
         _env_file=None,
         environment="production",
         executor_service_token="x" * 48,
-        database_url="postgresql+psycopg://devbox:unique-random-secret@db:5432/devbox",
+        database_url="postgresql+psycopg://devbox:unique-random-secret-long-enough@db:5432/devbox",
     )
     assert settings.environment == "production"
 
