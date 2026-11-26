@@ -612,3 +612,41 @@ def test_git_helper_rejects_symlinked_git_metadata(tmp_path, monkeypatch):
 
     assert error.value.status_code == 409
     assert fake_docker.containers.kwargs is None
+
+
+def test_broker_restore_swap_failure_rolls_back_and_recovery_is_idempotent(
+    tmp_path, monkeypatch
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    storage = FakeRestoreStorage(tmp_path)
+    monkeypatch.setattr(broker, "storage_backends", {"workspace": storage, "snapshot": storage})
+    _, workspace = storage._workspace_path(workspace_id)
+    workspace.mkdir()
+    (workspace / "previous.txt").write_text("previous", encoding="utf-8")
+    stage = tmp_path / f".{workspace.name}.restore-stage"
+    stage.mkdir()
+    (stage / "restored.txt").write_text("restored", encoding="utf-8")
+    real_replace = broker.os.replace
+
+    def fail_stage_swap(source, destination):
+        if source == stage and destination == workspace:
+            raise OSError("injected stage-swap failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(broker.os, "replace", fail_stage_swap)
+
+    with pytest.raises(HTTPException) as error:
+        broker.api_commit_storage_restore("workspace", workspace_id)
+
+    assert error.value.status_code == 503
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert stage.is_dir()
+    assert not (tmp_path / f".{workspace.name}.restore-backup").exists()
+
+    first_recovery = broker.api_recover_storage_restore("workspace", workspace_id)
+    second_recovery = broker.api_recover_storage_restore("workspace", workspace_id)
+
+    assert first_recovery["state"] == "recovered"
+    assert second_recovery["state"] == "recovered"
+    assert (workspace / "previous.txt").read_text(encoding="utf-8") == "previous"
+    assert not stage.exists()
