@@ -5,7 +5,7 @@
 **Current hardening branch:** `phase-2-rootless-worker-hardening`  
 **Current base commit:** `088364d3bffd7fb03bc9010bd1be9057824bffb1`  
 **Base CI:** [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) passed.  
-**Status:** Deployment hardening and broker migration are verified; dedicated rootless-worker storage hardening is implemented and awaits branch CI.
+**Status:** Deployment hardening, broker migration, and rootless-worker storage hardening are verified. Adversarial archive, egress, cross-workspace, and concurrency work remains.
 
 ## Baseline findings and current disposition
 
@@ -38,8 +38,9 @@ Detailed plans: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md) an
 - [x] 2.2.3 Move XFS mount/project/quota administration behind broker; worker no longer has `CAP_SYS_ADMIN`.
 - [x] 2.2.4 Move Docker lifecycle, image builds, Git helper containers, and reconciliation behind broker; worker no longer mounts Docker socket or imports Docker SDK.
 - [ ] 2.2.5 Complete hostile Git configuration, timeout/output, and arbitrary helper capability tests.
-- [x] 2.2.6 Implement dedicated worker UID/GID `10002:10001`, all-capability drop, `no-new-privileges`, read-only root, isolated worker state, non-writable XFS mount roots, and broker-owned restore swaps. Current-branch CI verification is pending.
-- [ ] 2.2.7 Complete current-branch CI, adversarial tests, and release documentation.
+- [x] 2.2.6 Implement and verify dedicated worker UID/GID `10002:10001`, all-capability drop, `no-new-privileges`, read-only root, isolated worker state, non-writable XFS mount roots, and broker-owned restore swaps (CI run 45870278489 passed).
+- [x] 2.2.7 Complete current-branch CI and release documentation.
+- [ ] Complete adversarial Git/archive/egress/cross-workspace/concurrency tests.
 
 **Verified broker evidence:** CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed 146 unit tests (five skipped in quality) and all five Linux XFS/Docker integration tests. The latest base CI run [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) passed quality, image builds, Compose validation, and integration.
 
@@ -91,7 +92,7 @@ Detailed plans: [Phase 2.2 Privileged Broker](PHASE_2_2_PRIVILEGED_BROKER.md) an
 - [x] Added separate worker identity, broker-owned XFS mount-root permissions, worker-state volume, snapshot metadata migration, and broker-owned restore transitions.
 - [x] Added unit and Linux integration tests for rootless access and restore semantics.
 - [x] Updated implementation and security documentation.
-- [ ] Verify all current-branch changes in GitHub Actions; do not mark this subphase complete until quality and Linux XFS/Docker jobs pass.
+- [x] Verify all current-branch changes in GitHub Actions; quality and Linux XFS/Docker jobs both passed in run 45870278489.
 
 ## Privileged broker design constraints (research outcome)
 
