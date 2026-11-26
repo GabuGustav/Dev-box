@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 import secrets
 import sqlite3
 import tarfile
@@ -526,6 +527,79 @@ def prepare_restore_with_archive(
         lambda _source, _workspace_id, _snapshot_id: VerifiedArchiveReader(payload),
     )
     return store, workspace, snapshot
+
+
+
+def test_snapshot_restore_stage_creation_failure_cleans_stage_and_resets_quota(
+    tmp_path, monkeypatch
+):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    quota_multipliers = []
+    set_project_quota = workspace_storage.set_project_quota
+
+    def record_quota(workspace_id, multiplier=1):
+        quota_multipliers.append(multiplier)
+        return set_project_quota(workspace_id, multiplier)
+
+    def fail_after_stage_creation(
+        _workspace_id, directory, _project_id, quota_multiplier=1
+    ):
+        assert quota_multiplier == 3
+        directory.mkdir()
+        raise OSError("injected staging project setup failure")
+
+    monkeypatch.setattr(workspace_storage, "set_project_quota", record_quota)
+    monkeypatch.setattr(
+        workspace_storage, "prepare_project_directory", fail_after_stage_creation
+    )
+
+    with pytest.raises(SnapshotError, match="previous workspace was retained"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    stage = workspace.parent / f".{workspace.name}.restore-stage"
+    backup = workspace.parent / f".{workspace.name}.restore-backup"
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not stage.exists()
+    assert not backup.exists()
+    assert quota_multipliers == [3, 1]
+
+
+def test_snapshot_restore_old_tree_backup_rename_failure_retains_previous_tree(
+    tmp_path, monkeypatch
+):
+    store, workspace_storage = make_store(tmp_path)
+    workspace = workspace_storage.ensure_workspace(WORKSPACE_ID)
+    (workspace / "keep.txt").write_text("original", encoding="utf-8")
+    snapshot = store.create(WORKSPACE_ID, workspace)
+    quota_multipliers = []
+    set_project_quota = workspace_storage.set_project_quota
+
+    def record_quota(workspace_id, multiplier=1):
+        quota_multipliers.append(multiplier)
+        return set_project_quota(workspace_id, multiplier)
+
+    real_replace = os.replace
+    backup = workspace.parent / f".{workspace.name}.restore-backup"
+
+    def fail_old_tree_backup(source, destination):
+        if Path(source) == workspace and Path(destination) == backup:
+            raise OSError("injected old-tree backup rename failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(workspace_storage, "set_project_quota", record_quota)
+    monkeypatch.setattr(os, "replace", fail_old_tree_backup)
+
+    with pytest.raises(SnapshotError, match="previous workspace was retained"):
+        store.restore(WORKSPACE_ID, snapshot["snapshot_id"], workspace)
+
+    stage = workspace.parent / f".{workspace.name}.restore-stage"
+    assert (workspace / "keep.txt").read_text(encoding="utf-8") == "original"
+    assert not stage.exists()
+    assert not backup.exists()
+    assert quota_multipliers == [3, 1]
 
 
 def test_snapshot_restore_rejects_oversized_expanded_member(tmp_path, monkeypatch):
