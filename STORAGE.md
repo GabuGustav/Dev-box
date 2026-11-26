@@ -95,14 +95,14 @@ The broker's `broker_state` volume contains the XFS project registries. The `wor
 
 - The block quota applies to data stored beneath /workspace.
 - The inode quota limits file and directory count, reducing small-file exhaustion.
-- /tmp and /run are separate bounded tmpfs mounts (64 MiB and 16 MiB respectively); they are not part of the workspace's XFS block quota.
+- /tmp and /run are separate bounded tmpfs mounts (128 MiB and 16 MiB respectively); they are not part of the workspace's XFS block quota.
 - Container CPU, memory, PID, and network restrictions remain independent controls.
-- Snapshot create/list/restore/delete and periodic unsafe-mount reconciliation are implemented. Backup/restore drills and real-host integration verification are still pending. Opt-in XFS quota and Docker persistence/isolation tests exist but have not yet been verified on a dedicated Linux host.
+- Snapshot create/list/restore/delete and periodic unsafe-mount reconciliation are implemented. The five-test Linux XFS/Docker integration baseline passed in CI runs 45864319247 and 45868184349. Extended backup/restore drills and adversarial recovery tests remain pending.
 - This backend is not supported on Docker Desktop's ordinary VM filesystem. Use Docker Desktop for API development and mocked tests; use a Linux XFS host to validate actual workspace provisioning.
 
 ## Operational cautions
 
-The worker has both Docker socket access and CAP_SYS_ADMIN; compromise of this service can compromise the host. Keep it private, authenticate all internal requests, restrict who can deploy or modify it, and monitor its logs. This is a trusted infrastructure component, not an untrusted workspace.
+The broker has Docker socket access and `CAP_SYS_ADMIN`; compromise of this service can compromise the host. Keep it private, authenticate all internal requests, restrict who can deploy or modify it, and monitor its logs. The worker has no Docker socket or Linux capabilities, but it retains group-based read/write access to all workspace and snapshot trees. This is not hostile-tenant isolation.
 
 Do not call this container-level isolation a VM boundary. For hostile multi-tenant execution, evaluate microVM isolation before production exposure.
 
@@ -138,9 +138,9 @@ These tests are opt-in because they modify filesystem quota state and create Doc
 
 ## Security audit follow-up
 
-The current worker requires Docker socket access and `CAP_SYS_ADMIN` to manage containers and XFS project quotas. This is a host-privileged trust boundary: compromise of the worker may compromise the host and every workspace. Keep this service private and tightly controlled until the planned narrow host broker is implemented and independently tested.
+The privileged broker requires Docker socket access and `CAP_SYS_ADMIN` to manage containers and XFS project quotas. This is a host-privileged trust boundary: compromise of the broker may compromise the host and every workspace. Keep this service private and tightly controlled. The worker runs without those privileges but still has group-based access to all workspace and snapshot trees.
 
-The broker must accept only workspace-scoped typed operations and derive storage paths/project IDs from trusted registry state. It must not accept arbitrary host paths, arbitrary Docker API payloads, or shell commands. This is a remediation target; it is not implemented by this document update.
+The broker accepts workspace-scoped typed operations and derives storage paths/project IDs from trusted registry state. It does not accept arbitrary host paths, arbitrary Docker API payloads, or shell commands. Docker and XFS broker operations are implemented; rootless worker storage and restore changes are awaiting current-branch CI verification.
 
 Real XFS/Docker integration, adversarial snapshot archive tests, interrupted-restore drills, and registry/key recovery exercises remain required. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
 
@@ -151,5 +151,5 @@ Real XFS/Docker integration, adversarial snapshot archive tests, interrupted-res
 ## Privilege boundary
 
 - **Broker:** runs with Docker socket access and `CAP_SYS_ADMIN`; it owns the XFS project registries and is the only service that runs `findmnt`/`xfs_quota` operations. Its API exposes fixed workspace-scoped operations and bounded quota multipliers, not arbitrary host paths or Docker API passthrough.
-- **Worker:** runs as UID/GID 10001, has no Docker SDK/socket, no XFS tools, no `CAP_SYS_ADMIN`, and no Linux capabilities. Its root filesystem is read-only. It can access the shared workspace and snapshot mounts as UID 10001 so it can read, write, and atomically restore workspace files.
+- **Worker:** runs as UID/GID `10002:10001`, has no Docker SDK/socket, no XFS tools, no `CAP_SYS_ADMIN`, and no Linux capabilities. Its root filesystem is read-only. It can read/write per-workspace directories through GID 10001 but cannot write to XFS mount roots; restore directory swaps are broker-owned.
 - **Residual trust:** the worker can access every workspace directory on the shared mounts. The current design reduces host-level privilege but does not protect tenant data from a compromised worker. Per-workspace host identities or microVMs remain necessary for hostile multi-tenant guarantees.
