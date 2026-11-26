@@ -30,7 +30,7 @@ Default policy:
 - Enforce CPU, memory, disk block and inode, process, file descriptor, and wall-clock quotas.
 - Kill descendant processes and clean temporary resources on cancellation or deletion.
 
-The trusted storage worker has Docker socket access and CAP_SYS_ADMIN to administer XFS quotas; compromise of that worker can compromise the host. Keep it private and treat it as a privileged control-plane component. Containers reduce risk but share the host kernel. For hostile multi-tenant workloads, evaluate microVMs or dedicated VMs as a stronger boundary.
+The privileged broker has Docker socket access and CAP_SYS_ADMIN to administer XFS quotas; compromise of the broker can compromise the host. Keep it private and treat it as a privileged infrastructure component. The worker runs as UID/GID 10002:10001, drops all Linux capabilities, uses no-new-privileges and a read-only root filesystem, and reaches the broker only over a private authenticated network. The worker still has group-based read/write access to all workspace and snapshot trees, so a compromised worker can access multiple tenants' data. This is a blast-radius reduction, not hostile-tenant isolation. Containers reduce risk but share the host kernel. For hostile multi-tenant workloads, evaluate microVMs or dedicated VMs as a stronger boundary.
 
 ## 4. Identity and authorization
 
@@ -134,7 +134,7 @@ The current implementation has useful baseline controls, but must not be describ
 
 - **Remediated:** PostgreSQL no longer publishes a host port and Compose requires a deployment-specific `DB_PASSWORD`.
 - **Remediated by default:** the API binds to host loopback. External deployments still require TLS termination and a trusted-proxy configuration.
-- The worker mounts the Docker socket and receives `CAP_SYS_ADMIN` for Docker/XFS operations. Compromise of this process can compromise the host. This is an elevated trust-boundary risk, not proof of a remotely exploitable path.
+- **Remediated by broker migration:** only the broker mounts the Docker socket and receives `CAP_SYS_ADMIN`; the worker has neither. The broker remains host-privileged and must be protected accordingly.
 
 ### Controls observed in source
 
@@ -163,19 +163,16 @@ The remediation plan follows these primary references:
 - [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html) — reinforces that Docker socket access is effectively host-root access and that a read-only socket mount does not make the API read-only.
 - [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — documents project-tree initialization and quota management operations used by the current storage backend.
 
-The proposed host broker is therefore an application-level, typed capability boundary; it must not be a generic Docker socket proxy that forwards arbitrary daemon endpoints.
+The implemented host broker is an application-level, typed capability boundary; it is not a generic Docker socket proxy that forwards arbitrary daemon endpoints.
 
 
 ## 14. Remediation verification evidence
 
-CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830556) passed on the security-hardening branch:
+CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830556) verified deployment hardening and the initial Linux XFS/Docker integration lane. CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) verified the broker migration: Ruff and image builds passed, 146 tests passed (five skipped in quality), and all five Linux XFS/Docker integration tests passed. CI run [45868184349](https://github.com/GabuGustav/Dev-box/actions/runs/45868184349) verified the latest base Compose schema, image builds, quality checks, and Linux XFS/Docker integration.
 
-- Quality job: Compose validation and image builds passed; Ruff passed; 109 tests passed, 5 skipped; coverage 75%.
-- Linux XFS/Docker integration job: 5 tests passed on disposable loopback XFS project-quota filesystems. This included block/inode quota enforcement, encrypted snapshot restore across separate XFS mounts, workspace mount isolation, persistence across container replacement, and private PID namespace isolation.
+The integration suite uses disposable loopback XFS project-quota filesystems and verifies block/inode quota enforcement, encrypted snapshot restore across separate XFS mounts, workspace mount isolation, persistence across container replacement, and private PID namespace isolation. The latest rootless-worker changes add mount-root write denial and broker-owned restore swap tests; their branch CI is pending.
 
-The integration run caught and led to correction of an invalid explicit Docker `pid_mode="private"` value. DevBox now relies on Docker's default private PID namespace, and the integration test verifies the isolation behavior.
-
-This verifies the current baseline and Phase 2.1 deployment hardening; it does **not** complete the privileged-worker boundary, adversarial snapshot archive fuzzing, proxy bypass/DNS rebinding testing, distributed concurrency, or hostile-tenant isolation goals.
+The verified baseline does **not** complete adversarial snapshot archive fuzzing, proxy bypass/DNS rebinding testing, distributed concurrency, or hostile-tenant isolation goals.
 
 
 ## 15. Privileged broker migration status
