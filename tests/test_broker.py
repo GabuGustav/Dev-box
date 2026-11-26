@@ -279,7 +279,7 @@ class FakeXFSStorage:
         self._record(("validate",))
 
     def _workspace_path(self, workspace_id):
-        digest = __import__("hashlib").sha256(workspace_id.encode()).hexdigest()[:32]
+        digest = hashlib.sha256(workspace_id.encode()).hexdigest()[:32]
         return digest, self.root / digest
 
     def _project_id(self, workspace_id):
