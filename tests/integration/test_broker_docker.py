@@ -143,7 +143,7 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
                         network_enabled=True,
                     ),
                 )
-            assert fetch_error.value.status_code == 400
+            assert fetch_error.value.status_code == 422
             assert "transport 'file' not allowed" in str(fetch_error.value.detail)
         finally:
             git_network.remove()
