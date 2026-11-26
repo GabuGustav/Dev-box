@@ -78,3 +78,25 @@ def test_xfs_tools_are_installed_only_in_broker_image():
     assert "util-linux" not in worker_dockerfile
     assert "xfsprogs" in broker_dockerfile
     assert "util-linux" in broker_dockerfile
+
+def test_worker_is_non_root_read_only_and_capability_free():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    dockerfile = Path("worker.Dockerfile").read_text(encoding="utf-8")
+    assert worker["user"] == "10001:10001"
+    assert worker["read_only"] is True
+    assert worker["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in worker["security_opt"]
+    assert "USER 10001:10001" in dockerfile
+
+
+def test_worker_has_no_default_or_external_network_route():
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    worker = compose["services"]["worker"]
+    api = compose["services"]["api"]
+    assert "default" not in worker["networks"]
+    assert "worker_api" in worker["networks"]
+    assert "broker_internal" in worker["networks"]
+    assert "worker_api" in api["networks"]
+    assert compose["networks"]["worker_api"]["internal"] is True
+    assert "egress-proxy" not in worker.get("depends_on", {})
