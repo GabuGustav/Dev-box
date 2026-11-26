@@ -261,3 +261,105 @@ def test_stop_missing_workspace_is_idempotent(monkeypatch, tmp_path):
 
     assert result["state"] == "absent"
     assert result["container_id"] is None
+
+
+class FakeXFSStorage:
+    def __init__(self, root):
+        self.root = root
+        self.calls = []
+        self.failure = None
+
+    def _record(self, value):
+        if self.failure:
+            raise self.failure
+        self.calls.append(value)
+
+    def validate_backend(self):
+        self._record(("validate",))
+
+    def _workspace_path(self, workspace_id):
+        digest = __import__("hashlib").sha256(workspace_id.encode()).hexdigest()[:32]
+        return digest, self.root / digest
+
+    def _project_id(self, workspace_id):
+        digest = __import__("hashlib").sha256(workspace_id.encode()).hexdigest()
+        return (int(digest[:8], 16) & 0x7FFFFFFF) or 1
+
+    def ensure_workspace(self, workspace_id):
+        _, directory = self._workspace_path(workspace_id)
+        directory.mkdir(exist_ok=True)
+        self._record(("ensure", workspace_id))
+        return directory
+
+    def set_project_quota(self, workspace_id, multiplier=1):
+        self._record(("quota", workspace_id, multiplier))
+
+    def prepare_project_directory(
+        self, workspace_id, directory, project_id, quota_multiplier=1
+    ):
+        self._record(("prepare", workspace_id, project_id, quota_multiplier))
+        directory.mkdir()
+
+    def mark_workspace_initialized(self, workspace_id, directory):
+        self._record(("mark", workspace_id, str(directory)))
+
+    def delete_workspace(self, workspace_id):
+        self._record(("delete", workspace_id))
+
+
+def test_broker_storage_api_delegates_only_workspace_scoped_operations(
+    tmp_path, monkeypatch
+):
+    workspace_id = "dbx_abcdefghijklmnopqrstuv"
+    workspace = FakeXFSStorage(tmp_path / "workspaces")
+    snapshot = FakeXFSStorage(tmp_path / "snapshots")
+    workspace.root.mkdir()
+    snapshot.root.mkdir()
+    monkeypatch.setattr(
+        broker, "storage_backends", {"workspace": workspace, "snapshot": snapshot}
+    )
+
+    assert broker.api_validate_storage("workspace") == {
+        "storage_kind": "workspace",
+        "status": "ready",
+    }
+    ensured = broker.api_ensure_storage_workspace("workspace", workspace_id)
+    assert ensured["path"] == str(workspace.root / broker.names_for(workspace_id)[0].replace("devbox-ws-", ""))
+
+    quota = broker.api_set_storage_quota(
+        "workspace", workspace_id, broker.QuotaRequest(multiplier=3)
+    )
+    assert quota["multiplier"] == 3
+
+    prepared = broker.api_prepare_restore_directory(
+        "workspace", workspace_id, broker.QuotaRequest(multiplier=3)
+    )
+    assert prepared["path"].endswith(".restore-stage")
+
+    marked = broker.api_mark_storage_initialized("workspace", workspace_id)
+    assert marked["status"] == "initialized"
+    deleted = broker.api_delete_storage_workspace("workspace", workspace_id)
+    assert deleted["status"] == "deleted"
+    assert [call[0] for call in workspace.calls] == [
+        "validate",
+        "ensure",
+        "quota",
+        "prepare",
+        "mark",
+        "delete",
+    ]
+    assert snapshot.calls == []
+
+
+def test_broker_storage_api_maps_storage_failures_to_service_unavailable(
+    tmp_path, monkeypatch
+):
+    storage = FakeXFSStorage(tmp_path)
+    storage.failure = WorkspaceStorageError("XFS unavailable")
+    monkeypatch.setattr(
+        broker, "storage_backends", {"workspace": storage, "snapshot": storage}
+    )
+
+    with pytest.raises(HTTPException) as error:
+        broker.api_validate_storage("workspace")
+    assert error.value.status_code == 503
