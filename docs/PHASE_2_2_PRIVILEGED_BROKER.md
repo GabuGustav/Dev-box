@@ -142,3 +142,42 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 - [x] Source inventory: `worker/main.py`, `worker/storage.py`, `worker/snapshots.py`, `docker-compose.yml`, `worker.Dockerfile`, and related tests inspected.
 - [ ] Broker API design reviewed and implemented.
 - [ ] No code changes made in this branch yet.
+
+
+## Detailed implementation architecture
+
+### Storage adapter
+
+Keep `XFSWorkspaceStorage` as the privileged implementation used only inside the broker. Add a worker-side `RemoteXFSWorkspaceStorage` adapter that preserves the methods consumed by `SnapshotStore`:
+
+- `validate_backend()`
+- `ensure_workspace(workspace_id)`
+- `set_project_quota(workspace_id, multiplier)`
+- `prepare_project_directory(workspace_id, directory, project_id, quota_multiplier)`
+- `mark_workspace_initialized(workspace_id, directory)`
+- `delete_workspace(workspace_id)`
+- Pure local path/project-ID derivation for the configured storage root.
+
+The worker must not receive raw `findmnt` or `xfs_quota` command access. Broker methods take a storage-kind enum (`workspace` or `snapshot`) plus a validated workspace ID and bounded quota multiplier. The broker independently derives paths and project IDs, maintains the trusted XFS project registry, and refuses paths that are not the expected direct child of its configured mount.
+
+### Shared filesystem permissions during this transition
+
+The worker still performs snapshot archive reads/writes against the shared storage mounts. To remove root and `CAP_CHOWN` from the worker without breaking that flow:
+
+- Broker owns the mount roots and prepares them as root-owned, group `10001`, mode `2750`; the broker-owned XFS registry remains inaccessible for worker writes.
+- Broker creates per-workspace directories owned by `10001:10001`, mode `0770`.
+- Worker runs as UID `10002`, GID `10001`, with no added capabilities. It can operate on workspace trees through the shared group but cannot chown, alter the broker registry, or administer XFS.
+- Workspace/Git helper containers continue to run as `10001:10001` and receive only their own workspace bind mount.
+- Snapshot storage is not mounted into workspace containers.
+
+This is a transitional trust model: the worker can still read/write all workspace trees through group membership. It is not hostile-tenant isolation. A later per-workspace storage-operation boundary or microVM architecture is needed to prevent a compromised worker from reading another tenant's files.
+
+### Docker adapter
+
+Move Docker SDK usage entirely to the broker. The worker-side client exposes named operations only; it does not implement or tunnel the Docker Engine API. Broker methods own:
+- fixed workspace container lifecycle and inspect/identity validation;
+- fixed Git helper create/start/wait/logs/remove with strict Git operation allowlisting;
+- fixed image build/ensure using the broker's read-only build context;
+- managed container and orphan-helper reconciliation.
+
+The broker derives the container name and workspace mount path itself. Worker-supplied values must never select an image, mount, device, capability, network, entrypoint, or Docker host configuration.
