@@ -59,6 +59,9 @@ snapshot_store = SnapshotStore(
     SNAPSHOT_ENCRYPTION_KEY,
     max_snapshots=SNAPSHOT_MAX_COUNT,
     max_snapshot_bytes=SNAPSHOT_MAX_BYTES,
+    registry_path=os.getenv(
+        "DEVBOX_SNAPSHOT_REGISTRY_PATH", "/var/lib/devbox-worker/snapshots.sqlite3"
+    ),
 )
 
 
