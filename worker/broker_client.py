@@ -81,6 +81,8 @@ class BrokerClient:
                 detail = response.json().get("detail", response.text)
             except ValueError:
                 detail = response.text
+            if response.status_code == 504:
+                raise BrokerRejected(504, str(detail))
             if response.status_code >= 500:
                 raise BrokerUnavailable(str(detail))
             raise BrokerRejected(response.status_code, str(detail))
