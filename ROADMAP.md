@@ -60,7 +60,8 @@ The implementation checklist and exit gates are tracked in [Phase 2 Security Har
 - [x] Add Docker runtime-profile assertions while retaining cross-workspace filesystem and PID isolation integration coverage (CI pending).
 - [x] Enforce one broker and one worker per deployment with advisory volume locks; reference-count workspace locks and configure one Uvicorn worker.
 - [x] Run Phase 2.3 CI and fix all failures (run 45907271567 passed: Ruff, four image builds, Compose validation, 201 unit tests, and Linux XFS/Docker integration; 8 opt-in tests skipped in the quality job).
-- [ ] Complete remaining restore fault injection, property-based fuzz coverage, DNS-rebinding/redirect tests, and broader concurrency/device/mount isolation tests.
+- [x] Complete restore transition fault injection and malformed tar/PAX regression tests.
+- [ ] Evaluate property-based archive fuzzing; add DNS-rebinding/redirect tests and broader concurrency/device/mount isolation tests.
 - [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed in run 45864319247; extended recovery/fuzz drills remain).
 
 ## Phase 3 — Git and repository discovery
