@@ -13,7 +13,13 @@ from urllib.parse import urlsplit
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
-from worker.broker_client import BrokerClient, BrokerNotFound, BrokerRejected, BrokerUnavailable
+from worker.broker_client import (
+    BrokerClient,
+    BrokerError,
+    BrokerNotFound,
+    BrokerRejected,
+    BrokerUnavailable,
+)
 from worker.snapshots import SnapshotConflict, SnapshotError, SnapshotNotFound, SnapshotStore
 from worker.storage import WorkspaceStorageError, XFSWorkspaceStorage
 
@@ -162,6 +168,18 @@ def require_service_token(authorization: str | None = Header(default=None)) -> N
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
+def broker_call(operation):
+    try:
+        return operation()
+    except BrokerRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except BrokerUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Privileged broker is unavailable.",
+        ) from exc
+
+
 def names_for(workspace_id: str) -> tuple[str, str]:
     if not WORKSPACE_ID_PATTERN.fullmatch(workspace_id):
         raise HTTPException(status_code=422, detail="Invalid workspace ID.")
@@ -229,7 +247,7 @@ def reconcile_managed_containers() -> int:
                 snapshot_store.recover_restore(workspace_id)
                 workspace_storage.validate_backend()
                 recovered += 1
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "Workspace recovery failed; asking broker to stop executor",
                 extra={"workspace_id": workspace_id},
