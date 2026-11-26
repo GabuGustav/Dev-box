@@ -27,7 +27,7 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 - [x] 2.1.2 Replace hard-coded DB credentials with required environment inputs and reject known placeholder values in production configuration.
 - [x] 2.1.3 Preserve a documented local-development path with localhost-only API binding by default.
 - [x] 2.1.4 Document TLS termination at a reverse proxy for non-local deployments.
-- [ ] 2.1.5 Add Compose/configuration tests for secure defaults and missing/placeholder secrets (configuration tests added; first CI run caught one Ruff line-length failure, fixed in the branch; a fresh run is still required).
+- [x] 2.1.5 Add Compose/configuration tests for secure defaults and missing/placeholder secrets (108 tests passed in run 45860295750; the subsequent internal-proxy-network assertion is awaiting the next run).
 
 **Exit:** no public database listener by default; no committed production credentials; secure deployment requirements are executable and documented.
 
@@ -67,7 +67,7 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 
 ### 2.6 — CI, documentation, and release gate
 - [ ] 2.6.1 Add a security-focused CI job for static/config checks and adversarial unit tests.
-- [ ] 2.6.2 Add a Linux Docker/XFS integration workflow on a runner that can safely provision dedicated loopback XFS filesystems; never run destructive tests against the runner root filesystem.
+- [x] 2.6.2 Add a Linux Docker/XFS integration workflow that provisions disposable loopback XFS filesystems; its first execution is pending.
 - [ ] 2.6.3 Make CI report integration tests as passed, skipped with an explicit reason, or unavailable; do not silently count skipped tests as full verification.
 - [ ] 2.6.4 Update `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, and `ROADMAP.md` as implementation decisions change.
 - [ ] 2.6.5 Run the complete test/lint/build suite and review the resulting Actions run.
