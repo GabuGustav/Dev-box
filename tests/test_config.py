@@ -58,3 +58,12 @@ def test_production_rejects_documented_compose_placeholder():
                 "replace-with-a-unique-random-secret@db:5432/devbox"
             ),
         )
+
+def test_production_rejects_short_database_password():
+    with pytest.raises(ValidationError, match="24 characters"):
+        Settings(
+            _env_file=None,
+            environment="production",
+            executor_service_token="x" * 48,
+            database_url="postgresql+psycopg://devbox:short@db:5432/devbox",
+        )
