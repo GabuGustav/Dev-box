@@ -176,3 +176,10 @@ CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830
 The integration run caught and led to correction of an invalid explicit Docker `pid_mode="private"` value. DevBox now relies on Docker's default private PID namespace, and the integration test verifies the isolation behavior.
 
 This verifies the current baseline and Phase 2.1 deployment hardening; it does **not** complete the privileged-worker boundary, adversarial snapshot archive fuzzing, proxy bypass/DNS rebinding testing, distributed concurrency, or hostile-tenant isolation goals.
+
+
+## 15. Privileged broker migration status
+
+The `phase-2-privileged-broker` branch now contains a broker service skeleton, a separate broker token, an internal-only Compose network, fixed workspace container lifecycle operations, a Git helper command allowlist, and broker authorization/configuration tests.
+
+**This is not yet a privilege reduction in the running stack.** The worker still mounts `/var/run/docker.sock` and still receives `CAP_SYS_ADMIN`; the broker is an additional privileged service during migration. Do not deploy this intermediate branch as a hardened production release. The worker-to-broker migration and XFS quota delegation must complete before the worker's socket and capability are removed.
