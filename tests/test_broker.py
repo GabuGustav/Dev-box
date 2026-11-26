@@ -251,3 +251,13 @@ def test_broker_startup_rejects_placeholder_or_short_token(monkeypatch):
 
     monkeypatch.setattr(broker, "SERVICE_TOKEN", "x" * 48)
     assert broker.validate_service_token() is None
+
+def test_stop_missing_workspace_is_idempotent(monkeypatch, tmp_path):
+    monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", tmp_path)
+    monkeypatch.setattr(broker, "NotFound", MissingContainer)
+    monkeypatch.setattr(broker, "docker_client", FakeDocker())
+
+    result = broker.stop_workspace("dbx_abcdefghijklmnopqrstuv")
+
+    assert result["state"] == "absent"
+    assert result["container_id"] is None
