@@ -3,7 +3,7 @@
 **Branch:** `phase-2-xfs-quota-broker`  
 **Base:** `phase-2-privileged-broker`  
 **Base verification:** CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) completed successfully. Both the quality job and the dedicated Linux XFS/Docker integration job passed; the integration job ran all five tests.  
-**Status:** Plan recorded; implementation not yet verified.
+**Status:** Implementation committed; CI and Linux XFS/Docker verification pending.
 
 ## Objective
 
@@ -24,30 +24,30 @@ This is a blast-radius reduction. The worker still needs shared access to worksp
 ## Implementation phases
 
 ### 2.2.3-A — Persistent worker state and identity
-- [ ] Add a dedicated persistent worker-state volume, separate from broker state and XFS data.
-- [ ] Have the broker initialize that volume with owner UID `10002`, group GID `10001`, and restrictive permissions before the worker starts.
-- [ ] Move the snapshot metadata SQLite registry into worker state; migrate an existing legacy registry safely and atomically.
-- [ ] Keep XFS project registries exclusively in broker state.
+- [x] Add a dedicated persistent worker-state volume, separate from broker state and XFS data.
+- [x] Have the broker initialize that volume with owner UID `10002`, group GID `10001`, and restrictive permissions before the worker starts.
+- [x] Move the snapshot metadata SQLite registry into worker state; migrate an existing legacy registry read-only and atomically.
+- [x] Keep XFS project registries exclusively in broker state.
 
 ### 2.2.3-B — Shared XFS directory permissions
-- [ ] Broker validates and prepares each dedicated XFS mount root as root-owned/group `10001`, with setgid and no group write on the mount root.
-- [ ] Broker creates per-workspace directories as `10001:10001`, mode `2770`; restore staging directories use the same group-access contract.
-- [ ] Remove worker-side `chown` of snapshot directories. Snapshot data directories remain group `10001` and group-writable.
-- [ ] Ensure restored files remain writable by the workspace runtime's group without granting worker root or `CAP_CHOWN`.
-- [ ] Preserve fail-closed symlink, mountpoint, registry, device/inode, and XFS quota checks.
+- [x] Broker validates and prepares each dedicated XFS mount root as root-owned/group `10001`, mode `2750`, with no group write on the mount root.
+- [x] Broker creates per-workspace directories as `10001:10001`, mode `2770`; restore staging directories use the same group-access contract.
+- [x] Remove worker-side `chown` of snapshot directories. Snapshot data directories remain group `10001` and group-writable.
+- [x] Ensure restored files remain writable by the workspace runtime's group without granting worker root or `CAP_CHOWN`.
+- [x] Preserve fail-closed symlink, mountpoint, registry, device/inode, and XFS quota checks.
 
 ### 2.2.3-C — Rootless worker runtime
-- [ ] Run the worker as UID/GID `10002:10001`.
-- [ ] Drop all Linux capabilities and set `no-new-privileges:true`.
-- [ ] Make the worker root filesystem read-only; provide only bounded `/tmp` and the dedicated worker-state volume as writable paths.
-- [ ] Ensure worker startup, health checks, Git operations, snapshots, deletion, and reconciliation continue to work with the reduced identity.
-- [ ] Keep broker as the only service with Docker socket and `CAP_SYS_ADMIN`; broker network remains private and unpublished.
+- [x] Run the worker as UID/GID `10002:10001`.
+- [x] Drop all Linux capabilities and set `no-new-privileges:true`.
+- [x] Make the worker root filesystem read-only; provide only bounded `/tmp` and the dedicated worker-state volume as writable paths.
+- [ ] Verify worker startup, health checks, Git operations, snapshots, deletion, and reconciliation with the reduced identity in CI and Linux integration tests.
+- [x] Keep broker as the only service with Docker socket and `CAP_SYS_ADMIN`; broker network remains private and unpublished.
 
 ### 2.2.3-D — Verification and documentation
-- [ ] Add tests for broker-owned mount permissions, worker identity/capabilities, registry isolation, snapshot metadata migration, restore group access, and broker failure behavior.
+- [x] Add unit tests for broker-owned mount permissions, worker identity/capabilities, registry isolation, snapshot metadata migration, restore group access, and broker failure behavior.
 - [ ] Extend Linux XFS/Docker integration coverage to exercise non-root worker file access and workspace-container write access after snapshot restore.
-- [ ] Run Ruff, the full unit suite, Compose validation, image builds, and Linux XFS/Docker integration.
-- [ ] Update `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and the Phase 2.2 broker plan.
+- [ ] Run Ruff, the full unit suite, Compose validation, image builds, and Linux XFS/Docker integration on this branch.
+- [x] Update `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `STORAGE.md`, `DEPLOYMENT.md`, `ROADMAP.md`, and the Phase 2.2 broker plan.
 - [ ] Record workflow run IDs and distinguish passing checks from remaining adversarial work.
 
 ## Security invariants
@@ -66,7 +66,13 @@ This is a blast-radius reduction. The worker still needs shared access to worksp
 - [x] Inspected broker storage RPC, remote worker storage adapter, snapshot metadata handling, Compose mounts, and current worker container identity.
 - [x] Created this isolated branch from `phase-2-privileged-broker`.
 - [x] Recorded the implementation plan before changing runtime behavior.
-- [ ] Implementation and verification pending.
+- [x] Added broker-owned XFS root permissions and group-based workspace directory modes.
+- [x] Added persistent worker state, safe snapshot metadata migration, and private registry permissions.
+- [x] Delegated restore commit/recovery and directory fsync to the broker.
+- [x] Configured worker UID/GID `10002:10001`, all capabilities dropped, `no-new-privileges`, read-only root, and bounded `/tmp`.
+- [x] Added unit tests for compose policy, state preparation, metadata migration, restore delegation, and group access.
+- [x] Updated architecture, security, storage, deployment, roadmap, and broker implementation documents.
+- [ ] CI and Linux XFS/Docker integration verification pending.
 
 ## Research references
 
