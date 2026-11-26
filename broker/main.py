@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger("devbox.broker")
 
@@ -39,8 +39,17 @@ docker_client = docker.from_env(timeout=GIT_OPERATION_TIMEOUT_SECONDS + 30)
 
 
 class GitHelperRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     arguments: list[str] = Field(min_length=1, max_length=110)
     network_enabled: bool = False
+
+
+def validate_service_token() -> None:
+    if len(SERVICE_TOKEN) < 32 or "replace-this-with" in SERVICE_TOKEN.lower():
+        raise RuntimeError(
+            "DEVBOX_BROKER_TOKEN must be a unique non-placeholder secret of at least 32 characters."
+        )
 
 
 def require_service_token(authorization: str | None = Header(default=None)) -> None:
@@ -580,8 +589,7 @@ async def reconciliation_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if not SERVICE_TOKEN:
-        logger.warning("DEVBOX_BROKER_TOKEN is not configured; broker calls will be rejected.")
+    validate_service_token()
     ensure_image()
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
