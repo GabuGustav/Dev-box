@@ -56,11 +56,22 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
 
         assert started["state"] == "running"
         assert container.attrs["Config"]["User"] == "10001:10001"
-        assert container.attrs["HostConfig"]["ReadonlyRootfs"] is True
-        assert container.attrs["HostConfig"]["CapDrop"] == ["ALL"]
-        assert container.attrs["HostConfig"]["NetworkMode"] == "none"
-        assert container.attrs["HostConfig"]["IpcMode"] == "private"
-        assert container.attrs["HostConfig"]["PidsLimit"] == broker.WORKSPACE_PIDS
+        host_config = container.attrs["HostConfig"]
+        assert host_config["ReadonlyRootfs"] is True
+        assert host_config["CapDrop"] == ["ALL"]
+        assert host_config["NetworkMode"] == "none"
+        assert host_config["IpcMode"] == "private"
+        assert host_config["PidsLimit"] == broker.WORKSPACE_PIDS
+        assert host_config["Privileged"] is False
+        assert host_config.get("Devices") in (None, [])
+        assert host_config.get("PidMode") not in {"host"}
+        security_opt = host_config.get("SecurityOpt") or []
+        assert "no-new-privileges:true" in security_opt
+        assert not any("unconfined" in option.lower() for option in security_opt)
+        docker_security = client.info().get("SecurityOptions", [])
+        assert any("seccomp" in option.lower() for option in docker_security)
+        if any("apparmor" in option.lower() for option in docker_security):
+            assert container.attrs.get("AppArmorProfile") == "docker-default"
         workspace_mount = next(
             mount
             for mount in container.attrs["Mounts"]
