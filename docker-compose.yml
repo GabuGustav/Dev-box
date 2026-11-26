@@ -49,6 +49,7 @@ services:
       DEVBOX_WORKSPACE_INODE_LIMIT: ${WORKSPACE_INODE_LIMIT:-200000}
       DEVBOX_SNAPSHOT_INODE_LIMIT: ${SNAPSHOT_INODE_LIMIT:-50000}
       DEVBOX_BROKER_STATE_ROOT: /var/lib/devbox-broker
+      DEVBOX_WORKER_STATE_ROOT: /var/lib/devbox-worker
       DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
     cap_add:
       - SYS_ADMIN
@@ -57,6 +58,7 @@ services:
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
       - ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}:${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
       - broker_state:/var/lib/devbox-broker
+      - worker_state:/var/lib/devbox-worker
     networks:
       - broker_internal
     healthcheck:
@@ -75,6 +77,14 @@ services:
     build:
       context: .
       dockerfile: worker.Dockerfile
+    user: "10002:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=10002,gid=10001
     environment:
       DEVBOX_EXECUTOR_TOKEN: ${EXECUTOR_SERVICE_TOKEN:?Set EXECUTOR_SERVICE_TOKEN in .env}
       DEVBOX_BROKER_URL: http://broker:9100
@@ -88,6 +98,7 @@ services:
       DEVBOX_SNAPSHOT_ENCRYPTION_KEY: ${SNAPSHOT_ENCRYPTION_KEY:-}
       DEVBOX_SNAPSHOT_MAX_COUNT: ${SNAPSHOT_MAX_COUNT:-10}
       DEVBOX_SNAPSHOT_MAX_BYTES: ${SNAPSHOT_MAX_BYTES:-10737418240}
+      DEVBOX_SNAPSHOT_REGISTRY_PATH: /var/lib/devbox-worker/snapshots.sqlite3
       DEVBOX_RECONCILE_INTERVAL_SECONDS: ${RECONCILE_INTERVAL_SECONDS:-60}
     networks:
       - default
@@ -95,6 +106,7 @@ services:
     volumes:
       - ${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}:${WORKSPACE_STORAGE_ROOT:-/srv/devbox/workspaces}
       - ${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}:${SNAPSHOT_STORAGE_ROOT:-/srv/devbox/snapshots}
+      - worker_state:/var/lib/devbox-worker
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
       interval: 5s
@@ -124,6 +136,7 @@ services:
 volumes:
   devbox_postgres:
   broker_state:
+  worker_state:
 
 networks:
   egress_internal:
