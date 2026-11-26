@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from worker.broker_client import BrokerClient, BrokerError
-from worker.storage import QUOTA_PATTERN, WORKSPACE_ID_PATTERN, WorkspaceStorageError, _set_owner
+from worker.storage import QUOTA_PATTERN, WORKSPACE_ID_PATTERN, WorkspaceStorageError
 
 
 class RemoteWorkspaceStorage:
@@ -22,8 +21,6 @@ class RemoteWorkspaceStorage:
         inode_limit: int,
         storage_kind: str,
         broker_client: BrokerClient,
-        *,
-        owner_setter: Callable = _set_owner,
     ) -> None:
         if not (Path(root).is_absolute() or PurePosixPath(root).is_absolute()):
             raise WorkspaceStorageError("Workspace storage root must be an absolute path.")
@@ -38,7 +35,6 @@ class RemoteWorkspaceStorage:
         self.inode_limit = inode_limit
         self.storage_kind = storage_kind
         self.broker_client = broker_client
-        self.owner_setter = owner_setter
         self.registry = self.root / ".devbox-storage.sqlite3"
 
     def _call(self, operation):
