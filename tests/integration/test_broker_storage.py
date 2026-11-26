@@ -78,6 +78,8 @@ def test_broker_storage_rpc_enforces_xfs_quota_and_registry_isolation(monkeypatc
     try:
         assert broker.api_validate_storage("workspace")["status"] == "ready"
         assert broker.api_validate_storage("snapshot")["status"] == "ready"
+        broker.prepare_shared_storage_permissions(workspace_storage)
+        broker.prepare_shared_storage_permissions(snapshot_storage)
 
         workspace_path = Path(
             broker.api_ensure_storage_workspace("workspace", workspace_id)["path"]
