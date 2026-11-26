@@ -90,3 +90,50 @@ These findings distinguish confirmed unsafe defaults from risks that still requi
 - [x] Confirm the remediation branch was created from the Phase 2 branch ref; exact base SHA is recorded in PR #1.
 - [ ] Re-verify a green CI run after the lint correction before treating Phase 2.1 as verified.
 - [x] Phase 2.1 implementation edits committed: Compose, environment template, production settings validation, tests, CI trigger/Compose validation, and deployment documentation. Test results are pending; do not treat Phase 2.1 as complete until Actions is green.
+
+
+## Privileged broker design constraints (research outcome)
+
+Docker's own security guidance explains that daemon control can mount arbitrary host paths into containers and can therefore alter the host filesystem. A generic TCP Docker API or a read-only socket mount is not a meaningful privilege boundary. The implementation must be a typed host capability broker, not a Docker socket proxy.
+
+### Required topology
+
+```text
+API/control plane
+      |
+      | authenticated, workspace-scoped operation
+      v
+Unprivileged worker (no Docker socket, no CAP_SYS_ADMIN)
+      |
+      | private broker protocol; no public route
+      v
+Privileged host broker (Docker socket + narrowly required XFS authority)
+      |
+      +-- fixed workspace container lifecycle
+      +-- fixed Git-helper container lifecycle
+      +-- XFS project quota operations
+      +-- managed-container reconciliation
+```
+
+### Broker contract
+
+- Accept a workspace ID matching the existing strict identifier format; derive all host paths, project IDs, container names, labels, images, and mount targets internally.
+- Expose only named operations (ensure/start/stop/pause/resume/delete/inspect workspace, run an allowlisted Git helper operation, reconcile managed containers, inspect/assign/set/clear XFS project quotas).
+- Never accept arbitrary Docker API JSON, image names, host paths, mount definitions, capabilities, devices, network names, entrypoints, or shell commands.
+- Workspace containers must retain the current fixed hardening profile. Git helpers may use only the fixed Git image, the selected workspace mount, and the allowlisted egress network when the operation requires it.
+- Quota operations must accept typed block/inode values and derive project IDs/paths from trusted registry state. The broker must not accept raw `xfs_quota` command strings.
+- Authenticate broker requests with a separate secret, constant-time comparison, request-size limits, and private-network reachability. Keep the broker off public and egress networks.
+- Log actor/service, workspace, operation, policy decision, and result without logging secrets or repository contents.
+- Fail closed on missing registry entries, path identity mismatch, unknown operations, or invalid state.
+- Add negative tests for arbitrary mounts, host-root paths, alternate images, devices, privileged flags, cross-workspace IDs, and arbitrary daemon API forwarding.
+
+### Explicit limitation
+
+This design reduces the worker's direct host-root capability; it does **not** by itself create a per-tenant trust boundary if the unprivileged worker can still read/write the shared workspace and snapshot roots or can request operations for arbitrary workspace IDs. Strong hostile-tenant isolation requires workspace-scoped authorization at the broker boundary and storage access scoped to one workspace operation (or a stronger VM/microVM architecture). Do not label the broker milestone complete until that limitation is either addressed or explicitly accepted in the threat model.
+
+### Research references
+
+- [Docker Engine security](https://docs.docker.com/engine/security/) — daemon access can expose host filesystems; Docker specifically warns about services that provision containers through a daemon API.
+- [Docker daemon socket protection](https://docs.docker.com/engine/security/protect-access/) — prefer protected Unix-socket, SSH, or mutually authenticated TLS access; do not expose unauthenticated Docker TCP.
+- [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html) — socket access is effectively host-root access and a read-only mount does not make Docker API operations read-only.
+- [xfs_quota(8)](https://man7.org/linux/man-pages/man8/xfs_quota.8.html) — XFS project-tree setup, clearing, and quota limit semantics.
