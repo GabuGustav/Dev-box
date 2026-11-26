@@ -526,6 +526,13 @@ class SnapshotStore:
 
 
     def recover_restore(self, workspace_id: str) -> None:
+        broker_recovery = getattr(self.workspace_storage, "recover_restore", None)
+        if callable(broker_recovery):
+            try:
+                broker_recovery(workspace_id)
+            except Exception as exc:
+                raise SnapshotError("Unable to recover interrupted workspace restore.") from exc
+            return
         self.workspace_storage.validate_backend()
         _, workspace_directory = self.workspace_storage._workspace_path(workspace_id)
         stage = workspace_directory.parent / f".{workspace_directory.name}.restore-stage"
@@ -578,36 +585,49 @@ class SnapshotStore:
                 workspace_id, stage, project_id, quota_multiplier=3
             )
             self._extract(encrypted_path, workspace_id, snapshot_id, stage)
-            if workspace_directory.exists():
-                os.replace(workspace_directory, backup)
-                self._fsync_directory(workspace_directory.parent)
-            try:
-                os.replace(stage, workspace_directory)
-                self._fsync_directory(workspace_directory.parent)
-                self.workspace_storage.mark_workspace_initialized(
-                    workspace_id, workspace_directory
-                )
-            except Exception:
-                if backup.exists() and not workspace_directory.exists():
-                    os.replace(backup, workspace_directory)
-                raise
-            if backup.exists():
-                shutil.rmtree(backup)
-                self._fsync_directory(workspace_directory.parent)
-            self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
+            broker_commit = getattr(self.workspace_storage, "commit_restore", None)
+            if callable(broker_commit):
+                broker_commit(workspace_id)
+            else:
+                if workspace_directory.exists():
+                    os.replace(workspace_directory, backup)
+                    self._fsync_directory(workspace_directory.parent)
+                try:
+                    os.replace(stage, workspace_directory)
+                    self._fsync_directory(workspace_directory.parent)
+                    self.workspace_storage.mark_workspace_initialized(
+                        workspace_id, workspace_directory
+                    )
+                except Exception:
+                    if backup.exists() and not workspace_directory.exists():
+                        os.replace(backup, workspace_directory)
+                    raise
+                if backup.exists():
+                    shutil.rmtree(backup)
+                    self._fsync_directory(workspace_directory.parent)
+                self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
             return {
                 "snapshot_id": snapshot_id,
                 "workspace_id": workspace_id,
                 "state": "restored",
             }
         except Exception as exc:
-            if stage.exists():
-                shutil.rmtree(stage, ignore_errors=True)
-            if backup.exists() and not workspace_directory.exists():
-                os.replace(backup, workspace_directory)
-                self._fsync_directory(workspace_directory.parent)
-            if not backup.exists():
-                self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
+            broker_recovery = getattr(self.workspace_storage, "recover_restore", None)
+            if callable(broker_recovery):
+                try:
+                    broker_recovery(workspace_id)
+                except Exception as recovery_error:
+                    raise SnapshotError(
+                        "Snapshot restore failed and broker recovery requires operator attention."
+                    ) from recovery_error
+            else:
+                if stage.exists():
+                    shutil.rmtree(stage, ignore_errors=True)
+                if backup.exists() and not workspace_directory.exists():
+                    os.replace(backup, workspace_directory)
+                    self._fsync_directory(workspace_directory.parent)
+                if not backup.exists():
+                    self.workspace_storage.set_project_quota(workspace_id, multiplier=1)
             if isinstance(exc, SnapshotError):
                 raise
             raise SnapshotError(
