@@ -2,7 +2,7 @@
 
 **Branch:** `phase-2-privileged-broker`  
 **Base:** `phase-2-security-hardening`  
-**Status:** Source inventory complete; broker implementation not started  
+**Status:** Docker and XFS operations migrated to broker; rootless-worker hardening is in progress on `phase-2-xfs-quota-broker`  
 **Parent verification:** CI run [45860830556](https://github.com/GabuGustav/Dev-box/actions/runs/45860830556) passed on the base branch.
 
 ## Objective
@@ -83,13 +83,13 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 **Exit:** only the worker can reach the broker on its private network; unauthorized, malformed, oversized, and unknown requests fail closed.
 
 ### 2.2.3 — XFS administration migration
-- [ ] Move `findmnt`/XFS state inspection and `xfs_quota` mutations behind typed broker methods.
-- [ ] Replace raw command runner injection with a broker quota client in production while preserving a deterministic fake for unit tests.
-- [ ] Broker derives mount roots and project paths from trusted configured roots and workspace IDs.
-- [ ] Broker accepts only positive bounded block/inode limits and a small restore multiplier range.
-- [ ] Add negative tests for traversal, alternate mount roots, unknown IDs, invalid limits, and arbitrary command attempts.
+- [x] Move `findmnt`/XFS state inspection and `xfs_quota` mutations behind typed broker methods.
+- [x] Replace worker-side command execution with `RemoteWorkspaceStorage` broker RPC while retaining the XFS adapter only in the broker.
+- [x] Broker derives mount roots and project paths from trusted configured roots and workspace IDs.
+- [x] Broker accepts only positive bounded quota multipliers (1–10); configured block/inode limits are broker-owned.
+- [x] Add broker storage RPC unit tests and real XFS quota integration coverage (five Linux XFS/Docker integration tests passed in run 45864319247).
 
-**Exit:** worker has no `CAP_SYS_ADMIN`; it cannot invoke XFS commands or choose arbitrary host mount paths.
+**Exit:** met at source and runtime-configuration level on the broker branch: worker has no `CAP_SYS_ADMIN` and cannot invoke XFS commands or choose arbitrary host mount paths.
 
 ### 2.2.4 — Docker lifecycle migration
 - [x] Move fixed workspace container create/start/stop/pause/unpause/remove/inspect to broker methods.
@@ -112,9 +112,9 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 
 ### 2.2.6 — Remove ambient worker privilege
 - [x] Remove `/var/run/docker.sock` from worker mounts.
-- [ ] Remove `CAP_SYS_ADMIN` from worker.
-- [ ] Run worker under a dedicated non-root UID/GID where compatible with shared storage access; document any remaining group-based access.
-- [ ] Keep Docker socket and XFS authority only in the broker.
+- [x] Remove `CAP_SYS_ADMIN` from worker.
+- [x] Configure worker UID/GID `10002:10001`, no Linux capabilities, `no-new-privileges`, and read-only root filesystem (CI verification pending on `phase-2-xfs-quota-broker`).
+- [x] Keep Docker socket and XFS authority only in the broker.
 - [x] Verify workspace containers cannot resolve or connect to broker service/network through Compose topology tests.
 
 **Exit:** runtime inspection confirms worker has no Docker socket, no `CAP_SYS_ADMIN`, and broker is not reachable from untrusted workspace containers.
@@ -143,8 +143,10 @@ The broker must not be reachable from workspace containers, the egress proxy, or
 - [ ] Broker API design fully integrated. Docker lifecycle, Git helper execution, and worker RPC migration are complete; XFS delegation, non-root worker, and broker live integration tests remain.
 - [x] Added broker package, FastAPI service, dedicated Docker image, internal Compose network, separate broker token, and unit tests for authorization, path validation, fixed workspace container configuration, Git command allowlisting, and idempotent stop behavior.
 - [x] CI run 45862764928: broker image build, proxy/workspace image builds, Compose validation, Ruff, and 132 tests passed; five XFS/Docker tests skipped in the quality job. The separate Linux XFS/Docker integration job passed all five tests. Broker-inclusive coverage: 69%.
-- [ ] Broker service has not yet been connected to worker routes; worker still mounts Docker socket and has `CAP_SYS_ADMIN`.
-- [ ] XFS quota operations are still executed directly by worker; privilege removal is not complete.
+- [x] Worker-to-broker Docker lifecycle and Git helper migration completed; no Docker socket or Docker SDK remains in the worker.
+- [x] XFS quota operations and project registries moved behind broker RPC; worker no longer has `CAP_SYS_ADMIN`.
+- [ ] Complete rootless worker CI verification and runtime tests on `phase-2-xfs-quota-broker`.
+- [ ] Complete adversarial broker capability, archive, egress, and shared-storage tenant-boundary tests.
 
 
 ## Detailed implementation architecture
@@ -168,10 +170,12 @@ The worker must not receive raw `findmnt` or `xfs_quota` command access. Broker 
 The worker still performs snapshot archive reads/writes against the shared storage mounts. To remove root and `CAP_CHOWN` from the worker without breaking that flow:
 
 - Broker owns the mount roots and prepares them as root-owned, group `10001`, mode `2750`; the broker-owned XFS registry remains inaccessible for worker writes.
-- Broker creates per-workspace directories owned by `10001:10001`, mode `0770`.
-- Worker runs as UID `10002`, GID `10001`, with no added capabilities. It can operate on workspace trees through the shared group but cannot chown, alter the broker registry, or administer XFS.
+- Broker creates per-workspace directories owned by `10001:10001`, mode `2770` (setgid with group read/write/execute).
+- Worker runs as UID `10002`, GID `10001`, with all capabilities dropped, `no-new-privileges`, and a read-only root filesystem. It can operate on workspace trees through the shared group but cannot chown, alter the broker registry, or administer XFS.
 - Workspace/Git helper containers continue to run as `10001:10001` and receive only their own workspace bind mount.
 - Snapshot storage is not mounted into workspace containers.
+- Snapshot metadata lives in the dedicated `worker_state` volume; the broker initializes it for UID/GID `10002:10001`. The worker migrates any legacy snapshot metadata database read-only.
+- The worker cannot rename workspace directories at the XFS mount root. Snapshot restore commit and recovery are typed broker operations; the broker performs and fsyncs the atomic directory swap.
 
 This is a transitional trust model: the worker can still read/write all workspace trees through group membership. It is not hostile-tenant isolation. A later per-workspace storage-operation boundary or microVM architecture is needed to prevent a compromised worker from reading another tenant's files.
 
@@ -188,4 +192,8 @@ The broker derives the container name and workspace mount path itself. Worker-su
 
 ### Verified worker-to-broker migration
 
-CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed: both Docker images (broker and worker), Compose validation, Ruff, 146 tests passed, 5 skipped, 71% coverage; the dedicated Linux XFS/Docker integration job passed all five integration tests. The worker no longer has a Docker socket or Docker SDK. It still has `CAP_SYS_ADMIN` pending the XFS storage migration.
+CI run [45864319247](https://github.com/GabuGustav/Dev-box/actions/runs/45864319247) passed: both Docker images (broker and worker), Compose validation, Ruff, 146 tests passed, 5 skipped, 71% coverage; the dedicated Linux XFS/Docker integration job passed all five integration tests. The worker has no Docker socket, Docker SDK, XFS commands, or `CAP_SYS_ADMIN`.
+
+### Rootless worker transition — current branch
+
+Branch `phase-2-xfs-quota-broker` adds a dedicated worker UID/GID, capability drop, read-only root, persistent worker-state volume, group-based XFS directory permissions, read-only migration of legacy snapshot metadata, and broker-owned restore commit/recovery. Unit/integration tests and documentation have been added. The branch CI run is pending; do not treat this transition as verified until both quality and Linux XFS/Docker integration jobs pass.
