@@ -6,7 +6,7 @@ DevBox is a model-agnostic platform where AI agents can work with real repositor
 
 ## Current status
 
-**Phase 3 implementation exists, and Phase 2 security remediation is in progress on `phase-2-security-hardening`; the privileged broker migration is isolated on `phase-2-privileged-broker`. The worker now delegates Docker lifecycle and Git helper execution to the private broker; its Docker socket and Docker SDK have been removed. The worker still retains `CAP_SYS_ADMIN` for XFS quota commands, which is the next migration step.** The broker migration has passed CI run 45864319247 (146 tests passed, five skipped, and all five Linux XFS/Docker integration tests passed). DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
+**Phase 2 security hardening is continuing on `phase-2-rootless-worker-hardening`, based on successful base commit `088364d` (CI run 45868184349).** Docker lifecycle and XFS quota administration are broker-owned; the worker has no Docker socket, Docker SDK, or `CAP_SYS_ADMIN`. This branch separates the worker identity (UID/GID `10002:10001`) from the workspace runtime (UID/GID `10001:10001`), makes XFS mount roots non-writable to the worker, moves snapshot metadata into a dedicated state volume, and delegates restore directory swaps to the broker. The branch changes are awaiting CI verification. DevBox supports public HTTPS repository cloning through an ephemeral Git helper, owner-scoped Git status/diff/branch/commit/fetch APIs, and a restricted egress proxy. General command/job execution, private-repository credentials, and Git push are not implemented yet.
 
 ## Core principles
 
@@ -30,6 +30,7 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 - [Workspace storage backend](STORAGE.md)
 - [Secure deployment](DEPLOYMENT.md)
 - [Phase 2 security hardening plan](docs/PHASE_2_SECURITY_HARDENING.md)
+- [Rootless worker implementation plan](docs/PHASE_2_2_3_ROOTLESS_WORKER.md)
 
 ## Stack
 
@@ -43,7 +44,7 @@ A repository can have multiple workspaces. The repository URL is a discovery key
 ## Run locally
 
 1. For actual workspace provisioning, use a Linux host with Docker Engine. Docker Desktop on Windows/macOS can be used for API and mocked-test development, but it does not provide the required dedicated XFS host mount.
-2. Prepare two dedicated Linux XFS filesystems: one for workspaces at `/srv/devbox/workspaces`, and one for encrypted snapshots at `/srv/devbox/snapshots`. Mount both with project quotas enabled (`prjquota` or `pquota`). Both mounts must exist before Compose starts and be visible at the same absolute paths inside the worker and to the Docker daemon. Do not format a disk that contains data; use dedicated data volumes and follow your host OS's XFS setup procedure.
+2. Prepare two dedicated Linux XFS filesystems: one for workspaces at `/srv/devbox/workspaces`, and one for encrypted snapshots at `/srv/devbox/snapshots`. Mount both with project quotas enabled (`prjquota` or `pquota`). Both mounts must exist before Compose starts and be visible at the same absolute paths inside the broker and worker and to the Docker daemon. Do not format a disk that contains data; use dedicated data volumes and follow your host OS's XFS setup procedure.
 3. Copy `.env.example` to `.env`.
 4. Set `DB_PASSWORD` to a unique URL-safe random secret, `EXECUTOR_SERVICE_TOKEN` and `BROKER_SERVICE_TOKEN` to separate fresh random secrets, and `SNAPSHOT_ENCRYPTION_KEY` to a generated 32-byte URL-safe base64 key. For example:
 
@@ -112,7 +113,7 @@ Workspace creation remains separate from provisioning. A workspace receives a st
 
 ## Isolation model and current limits
 
-The API does not mount the Docker socket. A separate privileged broker controls Docker and is the only service with access to the host Docker socket. The worker communicates with it over a private authenticated network. Workspace containers receive only their own dedicated bind-mounted directory on the XFS workspace filesystem. The worker still receives `CAP_SYS_ADMIN` to manage XFS project quotas; that capability will be removed when quota operations move behind the broker.
+The API and worker do not mount the Docker socket. A separate privileged broker controls Docker and XFS quota administration and is the only service with access to the host Docker socket and `CAP_SYS_ADMIN`. The worker communicates with it over a private authenticated network. The worker runs as UID/GID `10002:10001` with all capabilities dropped, `no-new-privileges`, and a read-only root filesystem. XFS mount roots are root-owned/group `10001`, mode `2750`; per-workspace directories are `10001:10001`, mode `2770`. Snapshot metadata is stored in a separate `worker_state` volume. The worker still has group-based read/write access to every workspace and snapshot directory, so this reduces host privilege but does not provide hostile-tenant data isolation.
 
 Workspace containers currently use:
 - A dedicated container and directory-tree project quota per workspace.
