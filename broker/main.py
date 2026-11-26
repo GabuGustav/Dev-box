@@ -337,6 +337,8 @@ def start_workspace(workspace_id: str) -> dict:
             nano_cpus=int(WORKSPACE_CPU * 1_000_000_000),
             pids_limit=WORKSPACE_PIDS,
             read_only=True,
+            privileged=False,
+            devices=[],
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
             tmpfs={
