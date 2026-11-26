@@ -952,14 +952,16 @@ def api_recover_storage_restore(
     try:
         if backup.exists():
             if workspace.exists():
+                storage.mark_workspace_initialized(workspace_id, workspace)
                 shutil.rmtree(backup)
             else:
                 os.replace(backup, workspace)
                 _fsync_storage_root(storage.root)
+                storage.mark_workspace_initialized(workspace_id, workspace)
+        elif workspace.exists():
+            storage.mark_workspace_initialized(workspace_id, workspace)
         if stage.exists():
             shutil.rmtree(stage)
-        if workspace.exists():
-            storage.mark_workspace_initialized(workspace_id, workspace)
         if workspace.exists() or restore_state_exists:
             storage.set_project_quota(workspace_id, multiplier=1)
         if restore_state_exists:
