@@ -2,47 +2,26 @@ import pytest
 from fastapi import HTTPException
 
 from worker import main as executor
+from worker.broker_client import BrokerRejected
 
 
-class FakeGitContainer:
-    def __init__(self, status_code=0, output=b"git operation complete"):
-        self.status_code = status_code
+class FakeGitBroker:
+    def __init__(self, output="git operation complete", error=None, removed=0):
         self.output = output
-        self.started = False
-        self.removed = False
-        self.stopped = False
+        self.error = error
+        self.removed = removed
+        self.calls = []
+        self.reconcile_calls = 0
 
-    def start(self):
-        self.started = True
-
-    def wait(self, timeout):
-        assert timeout == executor.GIT_OPERATION_TIMEOUT_SECONDS
-        return {"StatusCode": self.status_code}
-
-    def logs(self, **kwargs):
+    def run_git_helper(self, workspace_id, arguments, *, network_enabled=False):
+        self.calls.append((workspace_id, arguments, network_enabled))
+        if self.error:
+            raise self.error
         return self.output
 
-    def stop(self, timeout):
-        self.stopped = True
-
-    def remove(self, force):
-        self.removed = True
-
-
-class FakeGitContainers:
-    def __init__(self, container):
-        self.container = container
-        self.kwargs = None
-
-    def create(self, **kwargs):
-        self.kwargs = kwargs
-        return self.container
-
-
-class FakeGitDockerClient:
-    def __init__(self, container):
-        self.containers = FakeGitContainers(container)
-
+    def reconcile_git_helpers(self):
+        self.reconcile_calls += 1
+        return self.removed
 
 class FakeGitStorage:
     def __init__(self, path):
@@ -79,9 +58,8 @@ def test_git_branch_validation_rejects_unsafe_names(branch):
 
 
 def test_git_helper_uses_network_none_for_local_operations(monkeypatch, tmp_path):
-    container = FakeGitContainer()
-    fake = FakeGitDockerClient(container)
-    monkeypatch.setattr(executor, "docker_client", fake)
+    fake = FakeGitBroker()
+    monkeypatch.setattr(executor, "broker_client", fake)
     monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
 
     output = executor.run_git_command(
@@ -89,59 +67,62 @@ def test_git_helper_uses_network_none_for_local_operations(monkeypatch, tmp_path
     )
 
     assert output == "git operation complete"
-    assert fake.containers.kwargs["network_mode"] == "none"
-    assert fake.containers.kwargs["user"] == "10001:10001"
-    assert fake.containers.kwargs["cap_drop"] == ["ALL"]
-    assert fake.containers.kwargs["read_only"] is True
-    assert fake.containers.kwargs["labels"]["devbox.git_helper"] == "true"
-    assert "devbox.managed" not in fake.containers.kwargs["labels"]
-    assert fake.containers.kwargs["command"][:5] == [
-        "timeout",
-        "--signal=TERM",
-        "--kill-after=5s",
-        f"{executor.GIT_OPERATION_TIMEOUT_SECONDS}s",
-        "git",
+    assert fake.calls == [
+        ("dbx_abcdefghijklmnopqrstuv", ["status", "--short", "--branch"], False)
     ]
-    assert fake.containers.kwargs["volumes"] == {
-        str(tmp_path): {"bind": "/workspace", "mode": "rw"}
-    }
-    assert container.started is True
-    assert container.removed is True
 
 
-def test_git_helper_uses_only_internal_proxy_network_for_fetch(monkeypatch, tmp_path):
-    container = FakeGitContainer()
-    fake = FakeGitDockerClient(container)
-    monkeypatch.setattr(executor, "docker_client", fake)
+def test_git_helper_uses_internal_proxy_for_fetch(monkeypatch, tmp_path):
+    fake = FakeGitBroker()
+    monkeypatch.setattr(executor, "broker_client", fake)
     monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
-    monkeypatch.setattr(executor, "GIT_EGRESS_NETWORK", "devbox_egress_internal")
-    monkeypatch.setattr(executor, "GIT_PROXY_URL", "http://egress-proxy:3128")
 
     executor.run_git_command(
-        "dbx_abcdefghijklmnopqrstuv", ["fetch", "--prune", "origin"], network_enabled=True
+        "dbx_abcdefghijklmnopqrstuv",
+        ["fetch", "--prune", "origin"],
+        network_enabled=True,
     )
 
-    kwargs = fake.containers.kwargs
-    assert kwargs["network_mode"] == "devbox_egress_internal"
-    assert kwargs["environment"]["HTTPS_PROXY"] == "http://egress-proxy:3128"
-    assert kwargs["environment"]["HTTP_PROXY"] == "http://egress-proxy:3128"
+    assert fake.calls == [
+        ("dbx_abcdefghijklmnopqrstuv", ["fetch", "--prune", "origin"], True)
+    ]
 
 
-def test_git_helper_removes_container_after_failed_command(monkeypatch, tmp_path):
-    container = FakeGitContainer(status_code=1, output=b"remote branch not found")
-    fake = FakeGitDockerClient(container)
-    monkeypatch.setattr(executor, "docker_client", fake)
+def test_git_helper_surfaces_broker_rejection(monkeypatch, tmp_path):
+    fake = FakeGitBroker(error=BrokerRejected(422, "remote branch not found"))
+    monkeypatch.setattr(executor, "broker_client", fake)
     monkeypatch.setattr(executor, "workspace_storage", FakeGitStorage(tmp_path))
 
     with pytest.raises(HTTPException) as error:
         executor.run_git_command(
-            "dbx_abcdefghijklmnopqrstuv", ["clone", "https://github.com/a/b", "/workspace"]
+            "dbx_abcdefghijklmnopqrstuv",
+            [
+                "clone",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--branch",
+                "main",
+                "--",
+                "https://github.com/a/b",
+                "/workspace",
+            ],
+            network_enabled=True,
         )
 
     assert error.value.status_code == 422
     assert "remote branch not found" in error.value.detail
-    assert container.removed is True
+    assert len(fake.calls) == 1
 
+
+def test_reconciler_delegates_git_helper_cleanup_to_broker(monkeypatch):
+    fake = FakeGitBroker(removed=1)
+    monkeypatch.setattr(executor, "broker_client", fake)
+
+    removed = executor.reconcile_orphaned_git_helpers()
+
+    assert removed == 1
+    assert fake.reconcile_calls == 1
 
 def test_clone_refuses_nonempty_workspace_and_uses_proxy_for_clone(monkeypatch, tmp_path):
     workspace_id = "dbx_abcdefghijklmnopqrstuv"
