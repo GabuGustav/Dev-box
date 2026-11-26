@@ -25,8 +25,23 @@ def test_egress_proxy_blocks_private_and_unapproved_destinations():
     policy = (ROOT / "egress-proxy" / "squid.conf").read_text(encoding="utf-8")
     lines = [line.strip() for line in policy.splitlines() if line.strip()]
 
-    assert any(line.startswith("acl to_local dst ") for line in lines)
+    to_local = " ".join(
+        line for line in lines if line.startswith("acl to_local dst ")
+    )
+    required_ranges = (
+        "192.88.99.0/24",
+        "::/96",
+        "::ffff:0:0/96",
+        "64:ff9b::/96",
+        "64:ff9b:1::/48",
+        "100::/64",
+        "2001::/23",
+        "2002::/16",
+        "3fff::/20",
+    )
+    assert all(address_range in to_local for address_range in required_ranges)
     assert "http_access deny to_local" in lines
+    assert "http_access deny CONNECT !SSL_ports" in lines
     assert (
         "acl allowed_domains dstdomain .github.com .githubusercontent.com "
         ".gitlab.com .bitbucket.org .pypi.org .pythonhosted.org"
