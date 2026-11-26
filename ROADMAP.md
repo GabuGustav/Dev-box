@@ -51,10 +51,10 @@ The implementation checklist and exit gates are tracked in [Phase 2 Security Har
 
 - [x] Complete source-level security investigation and record confirmed risks versus unverified hypotheses.
 - [x] Create isolated remediation branch from `phase-2-isolated-workspaces`.
-- [ ] Complete deployment exposure and secret-hygiene fixes.
+- [x] Complete deployment exposure and secret-hygiene fixes (CI run 45860830556 passed).
 - [ ] Reduce privileged-worker blast radius with a narrowly scoped host broker.
-- [ ] Complete adversarial workspace, snapshot, and egress testing.
-- [ ] Verify recovery and CI on dedicated Linux XFS/Docker infrastructure.
+- [ ] Complete adversarial snapshot/archive and egress testing (XFS/Docker workspace integration baseline passed; adversarial archive and proxy bypass tests remain).
+- [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed; extended recovery/fuzz drills remain).
 
 ## Phase 3 — Git and repository discovery
 
