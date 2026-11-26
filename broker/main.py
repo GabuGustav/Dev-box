@@ -33,6 +33,9 @@ SNAPSHOT_STORAGE_ROOT = Path(
 BROKER_STATE_ROOT = Path(
     os.getenv("DEVBOX_BROKER_STATE_ROOT", "/var/lib/devbox-broker")
 )
+WORKER_STATE_ROOT = Path(
+    os.getenv("DEVBOX_WORKER_STATE_ROOT", "/var/lib/devbox-worker")
+)
 WORKSPACE_QUOTA = os.getenv("DEVBOX_WORKSPACE_DISK_QUOTA", "10g")
 SNAPSHOT_QUOTA = os.getenv("DEVBOX_SNAPSHOT_DISK_QUOTA", "20g")
 WORKSPACE_INODE_LIMIT = int(os.getenv("DEVBOX_WORKSPACE_INODE_LIMIT", "200000"))
@@ -644,10 +647,38 @@ async def reconciliation_loop() -> None:
 
 
 @asynccontextmanager
+def prepare_worker_state() -> None:
+    if WORKER_STATE_ROOT.is_symlink():
+        raise RuntimeError("Worker state root must not be a symbolic link.")
+    WORKER_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    if not WORKER_STATE_ROOT.is_dir():
+        raise RuntimeError("Worker state root must be a directory.")
+    os.chown(WORKER_STATE_ROOT, 10002, 10001)
+    WORKER_STATE_ROOT.chmod(0o700)
+
+
+def prepare_shared_storage_permissions(storage: XFSWorkspaceStorage) -> None:
+    root = storage.root
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError("Configured XFS storage root is missing or unsafe.")
+    # The mount root is traversable by the worker group but is not group-writable.
+    os.chown(root, 0, 10001)
+    root.chmod(0o2750)
+    legacy_metadata = root / ".devbox-snapshots.sqlite3"
+    if legacy_metadata.exists() or legacy_metadata.is_symlink():
+        if legacy_metadata.is_symlink() or not legacy_metadata.is_file():
+            raise RuntimeError("Legacy snapshot metadata registry is unsafe.")
+        # Permit read-only migration into the dedicated worker-state volume.
+        os.chown(legacy_metadata, 0, 10001)
+        legacy_metadata.chmod(0o640)
+
+
 async def lifespan(_: FastAPI):
     validate_service_token()
     for storage in storage_backends.values():
         storage.validate_backend()
+        prepare_shared_storage_permissions(storage)
+    prepare_worker_state()
     ensure_image()
     reconciler = asyncio.create_task(reconciliation_loop())
     try:
