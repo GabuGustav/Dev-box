@@ -343,7 +343,7 @@ def test_legacy_xfs_registry_symlink_is_rejected(tmp_path):
         storage._migrate_legacy_registry()
 
 
-def test_broker_storage_root_is_group_writable_for_non_root_worker(tmp_path):
+def test_broker_storage_root_is_not_group_writable_for_non_root_worker(tmp_path):
     root = tmp_path / "xfs-workspaces"
     root.mkdir()
     owner_calls = []
@@ -358,7 +358,7 @@ def test_broker_storage_root_is_group_writable_for_non_root_worker(tmp_path):
     storage.validate_backend()
 
     assert owner_calls == [(root, 0, 10001)]
-    assert root.stat().st_mode & 0o7777 == 0o2770
+    assert root.stat().st_mode & 0o7777 == 0o2750
 
 
 def test_storage_can_provision_group_accessible_workspace_directories(tmp_path):
@@ -370,10 +370,10 @@ def test_storage_can_provision_group_accessible_workspace_directories(tmp_path):
         runner=FakeRunner(),
         owner_setter=lambda *_: None,
         shared_group_id=10001,
-        directory_mode=0o770,
+        directory_mode=0o2770,
     )
 
     directory = storage.ensure_workspace(WORKSPACE_ID)
 
-    assert directory.stat().st_mode & 0o777 == 0o770
-    assert root.stat().st_mode & 0o7777 == 0o2770
+    assert directory.stat().st_mode & 0o7777 == 0o2770
+    assert root.stat().st_mode & 0o7777 == 0o2750
