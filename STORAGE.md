@@ -142,7 +142,7 @@ The privileged broker requires Docker socket access and `CAP_SYS_ADMIN` to manag
 
 See [Phase 2.2.3 Rootless Worker](docs/PHASE_2_2_3_ROOTLESS_WORKER.md) for the implementation sequence and verification status.
 
-The broker accepts workspace-scoped typed operations and derives storage paths/project IDs from trusted registry state. It does not accept arbitrary host paths, arbitrary Docker API payloads, or shell commands. Docker and XFS broker operations are implemented; rootless worker storage and restore changes are awaiting current-branch CI verification.
+The broker accepts workspace-scoped typed operations and derives storage paths/project IDs from trusted registry state. It does not accept arbitrary host paths, arbitrary Docker API payloads, or shell commands. Docker and XFS broker operations and rootless worker storage/restore changes are implemented and verified by CI run 45870278489 (174 unit tests passed, seven skipped, seven Linux XFS/Docker integration tests passed).
 
 Real XFS/Docker integration, adversarial snapshot archive tests, interrupted-restore drills, and registry/key recovery exercises remain required. See [docs/PHASE_2_SECURITY_HARDENING.md](docs/PHASE_2_SECURITY_HARDENING.md).
 
