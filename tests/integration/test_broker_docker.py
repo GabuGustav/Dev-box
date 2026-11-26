@@ -74,6 +74,20 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
             for name in directories + files:
                 os.chown(Path(root) / name, 10001, 10001)
 
+        fsmonitor_script = workspace_path / "fsmonitor.sh"
+        fsmonitor_marker = workspace_path / "fsmonitor-executed"
+        fsmonitor_script.write_text(
+            "#!/bin/sh\nprintf 'executed' > /workspace/fsmonitor-executed\n",
+            encoding="utf-8",
+        )
+        fsmonitor_script.chmod(0o755)
+        os.chown(fsmonitor_script, 10001, 10001)
+        subprocess.run(
+            ["git", "config", "--local", "core.fsmonitor", "/workspace/fsmonitor.sh"],
+            cwd=workspace_path,
+            check=True,
+        )
+
         output = broker.run_git_helper(
             workspace_id,
             broker.GitHelperRequest(
@@ -82,6 +96,7 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
             ),
         )
         assert "No commits yet" in output or "On branch" in output
+        assert not fsmonitor_marker.exists(), "Repository-local fsmonitor command was executed"
         assert client.containers.list(
             all=True,
             filters={
