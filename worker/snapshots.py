@@ -180,6 +180,7 @@ class SnapshotStore:
             raise SnapshotError("Snapshot metadata registry path is unsafe.")
         self.registry.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.registry, timeout=30)
+        self.registry.chmod(0o600)
         connection.execute(
             """CREATE TABLE IF NOT EXISTS snapshots (
                 snapshot_id TEXT PRIMARY KEY,
