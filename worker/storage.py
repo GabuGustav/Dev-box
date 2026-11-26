@@ -306,7 +306,7 @@ class XFSWorkspaceStorage:
                 )
         try:
             self.owner_setter(directory, 10001, 10001)
-            directory.chmod(0o700)
+            directory.chmod(0o2770)
         except OSError as exc:
             raise WorkspaceStorageError(
                 "Unable to assign workspace directory ownership to the unprivileged runtime user."
@@ -387,7 +387,7 @@ class XFSWorkspaceStorage:
         directory.mkdir(mode=0o700)
         try:
             self.owner_setter(directory, 10001, 10001)
-            directory.chmod(0o700)
+            directory.chmod(0o2770)
         except OSError as exc:
             raise WorkspaceStorageError(
                 "Unable to secure the restore staging directory."
