@@ -43,6 +43,7 @@ class XFSWorkspaceStorage:
         runner=subprocess.run,
         owner_setter=_set_owner,
         registry_path: str | Path | None = None,
+        shared_group_id: int | None = None,
     ) -> None:
         # Storage is provisioned on Linux, but importing/configuring the worker on
         # Windows must still accept its POSIX deployment paths. Also accept native
@@ -62,6 +63,9 @@ class XFSWorkspaceStorage:
         self.inode_limit = inode_limit
         self.runner = runner
         self.owner_setter = owner_setter
+        self.shared_group_id = shared_group_id
+        if shared_group_id is not None and shared_group_id < 0:
+            raise WorkspaceStorageError("Shared storage group ID must be non-negative.")
         self.legacy_registry = self.root / ".devbox-storage.sqlite3"
         self.registry = Path(registry_path) if registry_path else self.legacy_registry
         if not self.registry.is_absolute():
@@ -109,6 +113,14 @@ class XFSWorkspaceStorage:
             raise WorkspaceStorageError(
                 "XFS project quota accounting and enforcement must both be active."
             )
+        if self.shared_group_id is not None:
+            try:
+                self.owner_setter(self.root, 0, self.shared_group_id)
+                self.root.chmod(0o2770)
+            except OSError as exc:
+                raise WorkspaceStorageError(
+                    "Unable to grant the unprivileged worker group access to storage root."
+                ) from exc
 
     def _workspace_path(self, workspace_id: str) -> tuple[str, Path]:
         if not WORKSPACE_ID_PATTERN.fullmatch(workspace_id):
