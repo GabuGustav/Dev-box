@@ -53,7 +53,7 @@ The implementation checklist and exit gates are tracked in [Phase 2 Security Har
 - [x] Complete deployment exposure and secret-hygiene fixes (CI run 45860830556 passed).
 - [x] Move Docker lifecycle, Git helper execution, and XFS quota administration behind the private broker; worker has no Docker socket or `CAP_SYS_ADMIN` (CI run 45864319247 passed).
 - [x] Verify the Compose schema correction on the latest base (CI run 45868184349 passed).
-- [ ] Verify the dedicated UID/GID `10002:10001`, non-writable XFS mount roots, worker-state migration, and broker-owned restore swaps on `phase-2-rootless-worker-hardening`.
+- [x] Verify the dedicated UID/GID `10002:10001`, non-writable XFS mount roots, worker-state migration, and broker-owned restore swaps on `phase-2-rootless-worker-hardening` (CI run 45870278489 passed: 174 unit tests, seven skipped, seven Linux integration tests).
 - [ ] Complete adversarial snapshot/archive, egress bypass, cross-workspace, and concurrency testing.
 - [x] Verify baseline storage recovery and CI on dedicated Linux XFS/Docker infrastructure (five integration tests passed in run 45864319247; extended recovery/fuzz drills remain).
 
