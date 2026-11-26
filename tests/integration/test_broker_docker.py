@@ -33,7 +33,8 @@ def test_broker_owns_workspace_and_git_helper_container_lifecycle(monkeypatch):
         registry_path=state_root / "workspace-projects.sqlite3",
     )
     monkeypatch.setattr(broker, "WORKSPACE_STORAGE_ROOT", workspace_root)
-    monkeypatch.setattr(broker, "IMAGE_CONTEXT", str(Path(__file__).resolve().parents[2] / "workspace-image"))
+    image_context = Path(__file__).resolve().parents[2] / "workspace-image"
+    monkeypatch.setattr(broker, "IMAGE_CONTEXT", str(image_context))
     monkeypatch.setattr(broker, "IMAGE_NAME", "devbox-workspace:broker-integration")
     monkeypatch.setattr(
         broker,
